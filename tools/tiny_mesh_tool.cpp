@@ -37,16 +37,19 @@ struct VertexKey
     int32_t uv;
     int32_t normal;
 
-    // bool operator==(const VertexKey& other) const = default;
+    bool operator==(const VertexKey& other) const
+    {
+        return pos == other.pos && uv == other.uv && normal == other.normal;
+    }
 };
 
 struct VertexKeyHash
 {
     size_t operator()(const VertexKey& key) const 
     {
-        size_t h = std::hash<int>{}(k.pos);
-        h ^= std::hash<int>{}(k.uv)     + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash<int>{}(k.normal) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        size_t h = std::hash<int>{}(key.pos);
+        h ^= std::hash<int>{}(key.uv)     + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(key.normal) + 0x9e3779b9 + (h << 6) + (h >> 2);
         return h;
     }
 };
@@ -142,18 +145,38 @@ int main(int argc, char* argv[])
             for (size_t i = 0; i < shape.mesh.indices.size(); ++i) {
                 const tinyobj::index_t attrib_idx = shape.mesh.indices[i];
 
-                VertexKey key(attrib_idx.pos, attrib_idx.normal, attrib_idx.uv);
+                VertexKey key = { attrib_idx.vertex_index, attrib_idx.texcoord_index, attrib_idx.normal_index };
 
-                if (vertexIdxMap.find(key) == vertexIdxMap.end()) 
+                auto it = vertexIdxMap.find(key);
+                if (it == vertexIdxMap.end()) 
                 {
                     // new entry add to cache and extract data
                     Vertex v;
-                    v.pos    = attrib.vertices[attrib_idx.pos];
-                    v.normal = attrib.normals[attrib_idx.normal];
-                    v.uv     = attrib.texcoords[attrib_idx.texcoord];
+                    if (attrib_idx.vertex_index >= 0) {
+                        v.pos.x = attrib.vertices[3 * attrib_idx.vertex_index + 0];
+                        v.pos.y = attrib.vertices[3 * attrib_idx.vertex_index + 1];
+                        v.pos.z = attrib.vertices[3 * attrib_idx.vertex_index + 2];
+                    } else {
+                        v.pos = glm::vec3(0.0f);
+                    }
 
-                    uint32_t newIdx = vertexData.size();
-                    vertexIdxMap[newIdx] = key;
+                    if (attrib_idx.texcoord_index >= 0) {
+                        v.uv.x = attrib.texcoords[2 * attrib_idx.texcoord_index + 0];
+                        v.uv.y = attrib.texcoords[2 * attrib_idx.texcoord_index + 1];
+                    } else {
+                        v.uv = glm::vec2(0.0f);
+                    }
+
+                    if (attrib_idx.normal_index >= 0) {
+                        v.normal.x = attrib.normals[3 * attrib_idx.normal_index + 0];
+                        v.normal.y = attrib.normals[3 * attrib_idx.normal_index + 1];
+                        v.normal.z = attrib.normals[3 * attrib_idx.normal_index + 2];
+                    } else {
+                        v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+                    }
+
+                    uint32_t newIdx = static_cast<uint32_t>(vertexData.size());
+                    vertexIdxMap[key] = newIdx;
 
                     vertexData.push_back(v);
                     indexData.push_back(newIdx);
