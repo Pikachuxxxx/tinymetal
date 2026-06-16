@@ -152,11 +152,18 @@ if(NOT TINYMETAL_PLATFORM STREQUAL "iOS")
     )
     FetchContent_MakeAvailable(tinyobjloader)
 
+    FetchContent_Declare(
+        glm
+        GIT_REPOSITORY https://github.com/g-truc/glm.git
+        GIT_TAG 1.0.1
+    )
+    FetchContent_MakeAvailable(glm)
+
     add_executable(tiny-mesh-tool
         tools/tiny_mesh_tool.cpp
     )
 
-    target_link_libraries(tiny-mesh-tool PRIVATE meshoptimizer tinyobjloader)
+    target_link_libraries(tiny-mesh-tool PRIVATE meshoptimizer tinyobjloader glm::glm)
 
     # Easy command to run the main application
     add_custom_target(run
