@@ -84,7 +84,7 @@ bool export_mesh_data(const std::string& filepath,
                       const std::vector<Vertex>& vertices,
                       const std::vector<meshopt_Meshlet>& meshlets,
                       const std::vector<uint32_t>& meshletVertMap,
-                      const std::vector<uint8_t>& meshletIndices)
+                      const std::vector<uint32_t>& meshletIndices)
 {
     std::FILE* file = std::fopen(filepath.c_str(), "wb");
     if (!file) {
@@ -106,7 +106,7 @@ bool export_mesh_data(const std::string& filepath,
 
     uint64_t indices_size = meshletIndices.size();
     std::fwrite(&indices_size, sizeof(indices_size), 1, file);
-    std::fwrite(meshletIndices.data(), sizeof(uint8_t), meshletIndices.size(), file);
+    std::fwrite(meshletIndices.data(), sizeof(uint32_t), meshletIndices.size(), file);
 
     std::fclose(file);
     return true;
@@ -323,6 +323,38 @@ int main(int argc, char* argv[])
         }
         std::printf("[meshopt] Final meshlets generated: %zu\n", meshlets.size());
 
+        // repack indices into pack into uint32_t
+        std::vector<uint32_t> meshletIndexDataU32;
+        {
+            for (uint32_t m = 0; m < meshlets.size(); ++m) {
+                uint32_t indexOffset = meshletIndexDataU32.size();
+
+                meshopt_Meshlet& meshlet = meshlets[m];
+
+                for (uint32_t t = 0; t < meshlet.triangle_count; ++t) 
+                {
+                    uint32_t t0 = t * 3 + 0 + meshlet.triangle_offset;
+                    uint32_t t1 = t * 3 + 1 + meshlet.triangle_offset;
+                    uint32_t t2 = t * 3 + 1 + meshlet.triangle_offset;
+
+                    uint8_t idx0 = meshletIndices[t0];
+                    uint8_t idx1 = meshletIndices[t1];
+                    uint8_t idx2 = meshletIndices[t2];
+
+                    uint32_t packedIdx = ((idx0 & 0xFF) << 0) |
+                                         ((idx1 & 0xFF) << 8) |
+                                         ((idx1 & 0xFF) << 16);
+
+                    meshletIndexDataU32.push_back(packedIdx);
+                }
+
+                // update the new triangle offset for reading packed meshlet local indices
+                meshlet.triangle_offset = indexOffset;
+
+            }
+
+        }
+
         std::printf("\n--- Exporting data ---\n");
         std::string output_path = input_path;
         size_t dot_pos = output_path.find_last_of('.');
@@ -333,11 +365,11 @@ int main(int argc, char* argv[])
         }
 
         std::printf("Export path: %s\n", output_path.c_str());
-        if (export_mesh_data(output_path, vertexData, meshlets, meshletVertMap, meshletIndices)) {
+        if (export_mesh_data(output_path, vertexData, meshlets, meshletVertMap, meshletIndexDataU32)) {
             std::printf("[export] Exported %zu vertices (%zu bytes)\n", vertexData.size(), vertexData.size() * sizeof(Vertex));
             std::printf("[export] Exported %zu meshlets (%zu bytes)\n", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));
             std::printf("[export] Exported %zu vertex map entries (%zu bytes)\n", meshletVertMap.size(), meshletVertMap.size() * sizeof(uint32_t));
-            std::printf("[export] Exported %zu index entries (%zu bytes)\n", meshletIndices.size(), meshletIndices.size() * sizeof(uint8_t));
+            std::printf("[export] Exported %zu packed index entries (%zu bytes)\n", meshletIndexDataU32.size(), meshletIndexDataU32.size() * sizeof(uint32_t));
             std::printf("Export completed successfully!\n");
         } else {
             std::printf("Export failed!\n");
