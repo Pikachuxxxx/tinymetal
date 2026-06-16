@@ -15,13 +15,21 @@
 #define MESHLETS_OPTIMAL_VERTICES 64
 #define MESHLETS_OPTMIAL_PRIMS    124
 
+#define ALIGN(x, a) ((x + (a - 1)) & (a - 1))
+
 //******************************************************************************
 // Vertex Data
 //******************************************************************************
-// - [ ] Generate VB and IB data properly
-// - [ ] Process it using meshoptio for reuse/overdraw/fetch and optimize int
-// - [ ] Generate meshles (VB + IB + meshlets) 
+// - [x] Generate VB and IB data properly
+// - [ ] Process it using meshoptio for reuse/overdraw/fetch and optimize it
+//    meshopt_generateVertexRemap
+//    meshopt_optimizeVertexCache
+//    meshopt_optimizeOverdraw
+//    meshopt_optimizeVertexFetch
+//    meshopt_buildMeshlets
+// - [ ] Generate meshles 
 // - [ ] export all final VB + IB + meshlets to *.bin files
+// - [ ] Print all stats
 
 struct Vertex 
 {
@@ -67,6 +75,41 @@ void print_usage(const char* program_name)
     std::printf("  -i, --input, --obj <path>   Path to the input Wavefront OBJ file.\n");
     std::printf("  -h, --help                  Show this help menu.\n");
     std::printf("================================================================================\n");
+}
+
+//******************************************************************************
+// Export Data
+//******************************************************************************
+bool export_mesh_data(const std::string& filepath,
+                      const std::vector<Vertex>& vertices,
+                      const std::vector<meshopt_Meshlet>& meshlets,
+                      const std::vector<uint32_t>& meshletVertMap,
+                      const std::vector<uint8_t>& meshletIndices)
+{
+    std::FILE* file = std::fopen(filepath.c_str(), "wb");
+    if (!file) {
+        std::fprintf(stderr, "Error: Failed to open output file '%s'\n", filepath.c_str());
+        return false;
+    }
+
+    uint64_t vertices_size = vertices.size();
+    std::fwrite(&vertices_size, sizeof(vertices_size), 1, file);
+    std::fwrite(vertices.data(), sizeof(Vertex), vertices.size(), file);
+
+    uint64_t meshlets_size = meshlets.size();
+    std::fwrite(&meshlets_size, sizeof(meshlets_size), 1, file);
+    std::fwrite(meshlets.data(), sizeof(meshopt_Meshlet), meshlets.size(), file);
+
+    uint64_t vertmap_size = meshletVertMap.size();
+    std::fwrite(&vertmap_size, sizeof(vertmap_size), 1, file);
+    std::fwrite(meshletVertMap.data(), sizeof(uint32_t), meshletVertMap.size(), file);
+
+    uint64_t indices_size = meshletIndices.size();
+    std::fwrite(&indices_size, sizeof(indices_size), 1, file);
+    std::fwrite(meshletIndices.data(), sizeof(uint8_t), meshletIndices.size(), file);
+
+    std::fclose(file);
+    return true;
 }
 
 //******************************************************************************
@@ -187,10 +230,118 @@ int main(int argc, char* argv[])
                     indexData.push_back(it->second);
                 }
             }
-
         }
-        std::printf("\nTotal Indices across all shapes: %zu\n", total_indices);
-    }
 
+        std::printf("\nTotal Indices across all shapes: %zu\n", total_indices);
+        std::printf("Deduplicated Vertex Count:       %zu\n", vertexData.size());
+        std::printf("Generated Index Count:           %zu\n", indexData.size());
+
+        // MESHLET processing
+        std::printf("\n--- Begin Meshopt optimization---\n");
+        // Apply some meshopt optimization passes before generating meshlets
+        // vertex remapping
+        {
+            std::vector<uint32_t> remappedVerticesTable(vertexData.size());
+            size_t vertexCount = meshopt_generateVertexRemap(remappedVerticesTable.data(), indexData.data(), indexData.size(), vertexData.data(), vertexData.size(), sizeof(Vertex));
+            std::printf("[meshopt] Remapped vertices count after remapping: %zu\n", vertexCount);
+            std::printf("[meshopt] delta                                  : %zu\n", vertexData.size() - vertexCount);
+
+            // this will remove the duplicate vertices, we can use this map to build a new vertex buffer by taking stuff from the remappedVertices table
+            // we don't have to do this manually we can use the meshopt_remapVertexBuffer/remapIndexBuffer API to pass this and build new buffers
+            std::vector<Vertex> remappedVertices(vertexCount);
+            meshopt_remapVertexBuffer(remappedVertices.data(), vertexData.data(), vertexData.size(), sizeof(Vertex), remappedVerticesTable.data());
+
+            // now regenrate the index buffer as well
+            std::vector<uint32_t> remappedIndices(indexData.size());
+            meshopt_remapIndexBuffer(remappedIndices.data(), indexData.data(), indexData.size(), remappedVerticesTable.data());
+            
+            vertexData = std::move(remappedVertices);
+            indexData = std::move(remappedIndices);
+        }
+        std::printf("[meshopt] Meshopt Deduplicated Vertex Count      : %zu\n", vertexData.size());
+    
+        // optimize vertex cache
+        {
+            std::vector<uint32_t> optimalIndices(indexData.size());
+            meshopt_optimizeVertexCache(optimalIndices.data(), indexData.data(), indexData.size(), vertexData.size());
+
+            indexData = std::move(optimalIndices);
+        }
+
+        // optimize overdraw
+        {
+            std::vector<uint32_t> optimalIndices(indexData.size());
+            meshopt_optimizeOverdraw(optimalIndices.data(), indexData.data(), indexData.size(), vertexData.empty() ? NULL: &vertexData[0].pos.x, vertexData.size(), sizeof(Vertex), 1.15f);
+
+            indexData = std::move(optimalIndices);
+        }
+
+        // optimize vertex fetch
+        {
+            std::vector<Vertex> optimalVertices(vertexData.size());
+            size_t uniqueVertices = meshopt_optimizeVertexFetch(optimalVertices.data(), indexData.data(), indexData.size(), vertexData.data(), vertexData.size(), sizeof(Vertex));
+
+            optimalVertices.resize(uniqueVertices);
+
+            vertexData = std::move(optimalVertices);
+        }
+        std::printf("[meshopt] Optimized Vertex Count                 : %zu\n", vertexData.size());
+        std::printf("[meshopt] Optimized Optimized Index Count        : %zu\n", indexData.size());
+        
+        std::printf("\n--- Begin Meshlet generation---\n");
+        size_t maxMeshlets = meshopt_buildMeshletsBound(indexData.size(), MESHLETS_OPTIMAL_VERTICES, MESHLETS_OPTMIAL_PRIMS);
+        std::vector<meshopt_Meshlet> meshlets(maxMeshlets);
+        std::vector<uint32_t> meshletVertMap(maxMeshlets * MESHLETS_OPTIMAL_VERTICES);
+        std::vector<uint8_t> meshletIndices(maxMeshlets * MESHLETS_OPTMIAL_PRIMS * 3);
+        std::printf("Max meshlets that can be generated       : %zu\n", maxMeshlets);
+        
+        const float coneWeight = 0.0f;
+
+        size_t meshletCount = meshopt_buildMeshlets(
+                meshlets.data(), 
+                meshletVertMap.data(),
+                meshletIndices.data(),
+                indexData.data(),
+                indexData.size(),
+                vertexData.empty() ? NULL: &vertexData[0].pos.x,
+                vertexData.size(),
+                sizeof(Vertex),
+                MESHLETS_OPTIMAL_VERTICES,
+                MESHLETS_OPTMIAL_PRIMS,
+                coneWeight
+                );
+
+        if (meshletCount > 0) {
+            meshopt_Meshlet lastMeshlet = meshlets[meshletCount - 1];
+            meshlets.resize(meshletCount);
+            meshletVertMap.resize(lastMeshlet.vertex_offset + lastMeshlet.vertex_count);
+            meshletIndices.resize(lastMeshlet.triangle_offset + (ALIGN(lastMeshlet.triangle_count * 3, 4)));
+        } else {
+            meshlets.clear();
+            meshletVertMap.clear();
+            meshletIndices.clear();
+        }
+        std::printf("[meshopt] Final meshlets generated: %zu\n", meshlets.size());
+
+        std::printf("\n--- Exporting data ---\n");
+        std::string output_path = input_path;
+        size_t dot_pos = output_path.find_last_of('.');
+        if (dot_pos != std::string::npos) {
+            output_path = output_path.substr(0, dot_pos) + ".bin";
+        } else {
+            output_path += ".bin";
+        }
+
+        std::printf("Export path: %s\n", output_path.c_str());
+        if (export_mesh_data(output_path, vertexData, meshlets, meshletVertMap, meshletIndices)) {
+            std::printf("[export] Exported %zu vertices (%zu bytes)\n", vertexData.size(), vertexData.size() * sizeof(Vertex));
+            std::printf("[export] Exported %zu meshlets (%zu bytes)\n", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));
+            std::printf("[export] Exported %zu vertex map entries (%zu bytes)\n", meshletVertMap.size(), meshletVertMap.size() * sizeof(uint32_t));
+            std::printf("[export] Exported %zu index entries (%zu bytes)\n", meshletIndices.size(), meshletIndices.size() * sizeof(uint8_t));
+            std::printf("Export completed successfully!\n");
+        } else {
+            std::printf("Export failed!\n");
+        }
+    }
     return 0;
 }
