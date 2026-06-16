@@ -7,6 +7,7 @@ Minimal native Metal boilerplate for Apple platforms with:
 - CMake-only project generation
 - Native Cocoa on macOS
 - Native UIKit on iOS
+- `meshoptimizer` fetched via CMake `FetchContent` for a separate `tiny-mesh-tool`
 
 ## Do we have C bindings?
 
@@ -32,6 +33,7 @@ This project is designed for the Xcode CMake generator.
 cmake -S . -B build/macos -G Xcode -DTINYMETAL_PLATFORM=macOS
 cmake --build build/macos --config Debug
 open build/macos/Debug/TinyMetal.app
+./build/macos/Debug/tiny-mesh-tool
 ```
 
 ### iOS
@@ -45,7 +47,10 @@ Open the generated Xcode project if you want to run the iOS app in Simulator or 
 
 ## Layout
 
-- `src/shared`: shared renderer and shaders
-- `src/macos`: Cocoa entrypoint and native macOS view
-- `src/ios`: UIKit entrypoint and native iOS view
+- `src/render`: shared renderer and shaders
+- `src/macos/app`: Cocoa entrypoint and app delegates
+- `src/macos/window`: native macOS window/view code
+- `src/ios/app`: UIKit entrypoint, scene, and controllers
+- `src/ios/window`: native iOS window/view code
+- `tools`: standalone native utilities such as `tiny-mesh-tool`
 - `cmake`: bundle metadata templates

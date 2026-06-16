@@ -4,6 +4,9 @@
 
 #import "TMRenderer.h"
 
+//******************************************************************************
+// Private Interface
+//******************************************************************************
 @interface TMiOSMetalView ()
 
 @property (nonatomic, strong) CADisplayLink *displayLink;
@@ -11,13 +14,22 @@
 
 @end
 
+//******************************************************************************
+// Implementation
+//******************************************************************************
 @implementation TMiOSMetalView
 
+//******************************************************************************
+// UIView Overrides
+//******************************************************************************
 + (Class)layerClass
 {
     return [CAMetalLayer class];
 }
 
+//******************************************************************************
+// Lifecycle
+//******************************************************************************
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
@@ -43,6 +55,9 @@
     return self;
 }
 
+//******************************************************************************
+// View Events
+//******************************************************************************
 - (void)layoutSubviews
 {
     [super layoutSubviews];
@@ -60,6 +75,9 @@
     [self updateDrawableSize];
 }
 
+//******************************************************************************
+// Drawing
+//******************************************************************************
 - (void)drawFrame
 {
     [self.renderer draw];
@@ -67,8 +85,9 @@
 
 - (void)updateDrawableSize
 {
-    CGSize size = CGSizeMake(CGRectGetWidth(self.bounds) * self.contentScaleFactor,
-                             CGRectGetHeight(self.bounds) * self.contentScaleFactor);
+    CGSize boundsSize = self.bounds.size;
+    CGSize size = CGSizeMake(boundsSize.width * self.contentScaleFactor,
+                             boundsSize.height * self.contentScaleFactor);
     [self.renderer drawableSizeWillChange:size];
 }
 
