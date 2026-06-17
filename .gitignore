@@ -4,3 +4,7 @@ DerivedData/
 *.xcworkspace/
 *.swp
 .DS_Store
+.cache/
+compile_commands.json
+render_log.txt
+tags
