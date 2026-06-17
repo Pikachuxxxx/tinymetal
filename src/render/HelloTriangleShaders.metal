@@ -39,6 +39,8 @@ struct Uniforms
     float4x4 modelMatrix;
     float4x4 viewMatrix;
     float4x4 projectionMatrix;
+    uint renderMode;
+    float4 diffuseColor;
 };
 
 //******************************************************************************
@@ -107,18 +109,38 @@ struct Uniforms
         TMMeshVertex meshVertex = vertices[vertIdx];
 
         VertexOut outVertex;
-        // Transform the 2D vertex position to 3D clip space:
-        // Position on CPU has float2. We lift it to float4(pos.x, pos.y, 0.0, 1.0).
+        // Transform the 3D vertex position to 3D clip space:
         float4 localPosition = float4(meshVertex.position, 1.0);
         
         // Transform: Projection * View * Model * Position
         outVertex.position = uniforms.projectionMatrix * uniforms.viewMatrix * uniforms.modelMatrix * localPosition;
 
-        outVertex.color = float4(
-            float(gid & 1),
-            float(gid & 3) / 4,
-            float(gid & 7) / 8,
-            1.0f);
+        if (uniforms.renderMode == 1) // Meshlets
+        {
+            outVertex.color = float4(
+                float(gid & 1),
+                float(gid & 3) / 4.0f,
+                float(gid & 7) / 8.0f,
+                1.0f);
+        }
+        else if (uniforms.renderMode == 2) // UV Coordinates
+        {
+            outVertex.color = float4(meshVertex.uv, 0.0f, 1.0f);
+        }
+        else if (uniforms.renderMode == 3) // Normals
+        {
+            outVertex.color = float4(meshVertex.normal * 0.5f + 0.5f, 1.0f);
+        }
+        else if (uniforms.renderMode == 4) // Positions
+        {
+            outVertex.color = float4(meshVertex.position * 0.5f + 0.5f, 1.0f);
+        }
+        else // Default Shaded (Diffuse Lighting)
+        {
+            float3 lightDir = normalize(float3(0.5f, 1.0f, 0.5f));
+            float diffuse = max(dot(meshVertex.normal, lightDir), 0.15f);
+            outVertex.color = uniforms.diffuseColor * diffuse;
+        }
         
         outputMesh.set_vertex(gtid, outVertex);
     }

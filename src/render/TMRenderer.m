@@ -74,6 +74,9 @@ typedef struct {
     matrix_float4x4 modelMatrix;
     matrix_float4x4 viewMatrix;
     matrix_float4x4 projectionMatrix;
+    uint32_t renderMode;
+    uint32_t pad[3]; // 16-byte alignment padding
+    simd_float4 diffuseColor;
 } TMUniforms;
 
 typedef struct {
@@ -268,6 +271,8 @@ static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
     _cameraYaw = 0.0f;
     _cameraPitch = 0.0f;
     _aspect = 1.5f;
+    _renderMode = 0; // Default shaded
+    _diffuseColor = (simd_float4){1.0f, 1.0f, 1.0f, 1.0f}; // Default white
 
     // Parse command line arguments for a custom model path
     NSString *modelPath = @"./data/bunny.bin"; // Default
@@ -366,6 +371,8 @@ static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
     uniforms.modelMatrix = modelMatrix;
     uniforms.viewMatrix = viewMatrix;
     uniforms.projectionMatrix = projectionMatrix;
+    uniforms.renderMode = self.renderMode;
+    uniforms.diffuseColor = self.diffuseColor;
 
     id<MTLCommandBuffer> commandBuffer = [self.commandQueue commandBuffer];
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
