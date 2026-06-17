@@ -15,7 +15,7 @@
 #define MESHLETS_OPTIMAL_VERTICES 64
 #define MESHLETS_OPTMIAL_PRIMS    124
 
-#define ALIGN(x, a) ((x + (a - 1)) & (a - 1))
+#define ALIGN(x, a) (((x) + ((a) - 1)) & ~((a) - 1))
 
 //******************************************************************************
 // Vertex Data
@@ -34,9 +34,11 @@
 struct Vertex 
 {
     glm::vec3 pos;
+    float pad1 = 0.0f;
     glm::vec2 uv;
+    float pad2[2] = { 0.0f, 0.0f };
     glm::vec3 normal;
-
+    float pad3 = 0.0f;
 };
 
 struct VertexKey
@@ -327,7 +329,7 @@ int main(int argc, char* argv[])
         std::vector<uint32_t> meshletIndexDataU32;
         {
             for (uint32_t m = 0; m < meshlets.size(); ++m) {
-                uint32_t indexOffset = meshletIndexDataU32.size();
+                size_t indexOffset = meshletIndexDataU32.size();
 
                 meshopt_Meshlet& meshlet = meshlets[m];
 
@@ -335,7 +337,7 @@ int main(int argc, char* argv[])
                 {
                     uint32_t t0 = t * 3 + 0 + meshlet.triangle_offset;
                     uint32_t t1 = t * 3 + 1 + meshlet.triangle_offset;
-                    uint32_t t2 = t * 3 + 1 + meshlet.triangle_offset;
+                    uint32_t t2 = t * 3 + 2 + meshlet.triangle_offset;
 
                     uint8_t idx0 = meshletIndices[t0];
                     uint8_t idx1 = meshletIndices[t1];
@@ -343,16 +345,14 @@ int main(int argc, char* argv[])
 
                     uint32_t packedIdx = ((idx0 & 0xFF) << 0) |
                                          ((idx1 & 0xFF) << 8) |
-                                         ((idx1 & 0xFF) << 16);
+                                         ((idx2 & 0xFF) << 16);
 
                     meshletIndexDataU32.push_back(packedIdx);
                 }
 
                 // update the new triangle offset for reading packed meshlet local indices
-                meshlet.triangle_offset = indexOffset;
-
+                meshlet.triangle_offset = static_cast<uint32_t>(indexOffset);
             }
-
         }
 
         std::printf("\n--- Exporting data ---\n");
