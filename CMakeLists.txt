@@ -62,9 +62,12 @@ else()
     set(METALLIB_DESTINATION "$<TARGET_BUNDLE_DIR:${APP_NAME}>/Contents/Resources/default.metallib")
 endif()
 
+file(GLOB APP_RESOURCES "data/*.bin")
+
 add_executable(${APP_NAME} MACOSX_BUNDLE
     ${COMMON_SOURCES}
     ${PLATFORM_SOURCES}
+    ${APP_RESOURCES}
 )
 
 target_include_directories(${APP_NAME} PRIVATE
@@ -79,6 +82,7 @@ set_target_properties(${APP_NAME} PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST ${BUNDLE_PLIST}
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
     XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER com.example.tinymetal
+    RESOURCE "${APP_RESOURCES}"
 )
 
 if(TINYMETAL_PLATFORM STREQUAL "iOS")
