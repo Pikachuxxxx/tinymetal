@@ -11,6 +11,23 @@ struct VertexIn
     float4 color;
 };
 
+struct TMMeshVertex
+{
+    float3 position;
+    float2 uv;
+    float3 normal;
+};
+
+static_assert(sizeof(TMMeshVertex) == 48, "GPU TMMeshVertex size must be 48 bytes");
+
+struct TMMeshlet
+{
+    uint vertex_offset;
+    uint triangle_offset;
+    uint vertex_count;
+    uint triangle_count;
+};
+
 struct VertexOut
 {
     float4 position [[position]];
@@ -28,7 +45,7 @@ struct Uniforms
 // Mesh Shader
 //******************************************************************************
 [[mesh]] void hello_triangle_mesh_main(
-    mesh<VertexOut, void, 64, 124, topology::triangle> outputMesh,
+    mesh<VertexOut, void, 3, 1, topology::triangle> outputMesh,
     constant VertexIn *vertices [[buffer(0)]],
     constant Uniforms &uniforms [[buffer(1)]],
     uint threadIndex [[thread_index_in_threadgroup]])
@@ -51,6 +68,59 @@ struct Uniforms
         outVertex.color = vertices[threadIndex].color;
         
         outputMesh.set_vertex(threadIndex, outVertex);
+    }
+}
+
+[[mesh]] void hello_mesh_main(
+    mesh<VertexOut, void, 64, 128, topology::triangle> outputMesh,
+    device const TMMeshVertex* vertices [[buffer(0)]],
+    constant Uniforms &uniforms [[buffer(1)]],
+    device const TMMeshlet* meshlets [[buffer(2)]],
+    device const uint* meshletVertsMap [[buffer(3)]],
+    device const uint* meshletIndices [[buffer(4)]],
+    uint gtid [[thread_index_in_threadgroup]],
+    uint gid [[threadgroup_position_in_grid]]
+    )
+{
+    device const TMMeshlet& m = meshlets[gid];
+    outputMesh.set_primitive_count(m.triangle_count);
+
+    // set meshletIndices 
+    if (gtid < m.triangle_count)
+    {
+        uint packed = meshletIndices[m.triangle_offset + gtid];
+        uint vIdx0  = (packed >>  0) & 0xFF;
+        uint vIdx1  = (packed >>  8) & 0xFF;
+        uint vIdx2  = (packed >> 16) & 0xFF;
+        
+        // set the local primitive indices so we use gtid, of not we can use global thread id in grid instead.
+        uint triIdx = 3 * gtid;
+        outputMesh.set_index(triIdx + 0, vIdx0);
+        outputMesh.set_index(triIdx + 1, vIdx1);
+        outputMesh.set_index(triIdx + 2, vIdx2);
+    }
+
+    // output the vertices now    
+    if (gtid < m.vertex_count) 
+    {
+        uint vertIdx = meshletVertsMap[m.vertex_offset + gtid];
+        TMMeshVertex meshVertex = vertices[vertIdx];
+
+        VertexOut outVertex;
+        // Transform the 2D vertex position to 3D clip space:
+        // Position on CPU has float2. We lift it to float4(pos.x, pos.y, 0.0, 1.0).
+        float4 localPosition = float4(meshVertex.position, 1.0);
+        
+        // Transform: Projection * View * Model * Position
+        outVertex.position = uniforms.projectionMatrix * uniforms.viewMatrix * uniforms.modelMatrix * localPosition;
+
+        outVertex.color = float4(
+            float(gid & 1),
+            float(gid & 3) / 4,
+            float(gid & 7) / 8,
+            1.0f);
+        
+        outputMesh.set_vertex(gtid, outVertex);
     }
 }
 

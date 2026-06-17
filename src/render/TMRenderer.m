@@ -4,6 +4,64 @@
 #import <simd/simd.h>
 
 //******************************************************************************
+// Logging Utility
+//******************************************************************************
+static NSString* GetProjectRootDir() {
+    static NSString *projectRoot = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *bundleDir = [[NSBundle mainBundle] bundlePath];
+        NSString *currentSearchDir = bundleDir;
+        for (int i = 0; i < 10; i++) {
+            // Scan for a marker that represents the project root (e.g. CMakeLists.txt)
+            NSString *checkPath = [currentSearchDir stringByAppendingPathComponent:@"CMakeLists.txt"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:checkPath]) {
+                projectRoot = currentSearchDir;
+                break;
+            }
+            currentSearchDir = [currentSearchDir stringByDeletingLastPathComponent];
+            if ([currentSearchDir isEqualToString:@"/"] || currentSearchDir.length == 0) {
+                break;
+            }
+        }
+        if (!projectRoot) {
+            projectRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+        }
+    });
+    return projectRoot;
+}
+
+static void TMLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    
+    // Print to system console
+    NSLog(@"%@", message);
+    
+    // Write to render_log.txt in the project root
+    NSString *logPath = [GetProjectRootDir() stringByAppendingPathComponent:@"render_log.txt"];
+    NSString *logLine = [NSString stringWithFormat:@"%@\n", message];
+    
+    NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+    if (fileHandle) {
+        [fileHandle seekToEndOfFile];
+        [fileHandle writeData:[logLine dataUsingEncoding:NSUTF8StringEncoding]];
+        [fileHandle closeFile];
+    } else {
+        [logLine writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
+}
+
+//******************************************************************************
+// Defines
+//******************************************************************************
+
+#define TM_MAX_MESHLET_VERTS 64
+#define TM_MAX_MESHLET_TRIS  124
+
+//******************************************************************************
 // Types
 //******************************************************************************
 typedef struct
@@ -17,6 +75,19 @@ typedef struct {
     matrix_float4x4 viewMatrix;
     matrix_float4x4 projectionMatrix;
 } TMUniforms;
+
+typedef struct {
+    simd_float3 position;
+    simd_float2 uv;
+    simd_float3 normal;
+} TMMeshVertex;
+
+typedef struct {
+    uint32_t vertexOffset;
+    uint32_t triangleOffset;
+    uint32_t vertexCount;
+    uint32_t triangleCount;
+} TMMeshlet;
 
 //******************************************************************************
 // Constants
@@ -63,6 +134,14 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
     return m;
 }
 
+static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
+    simd_float4x4 m = matrix_identity_float4x4;
+    m.columns[0].x = sx;
+    m.columns[1].y = sy;
+    m.columns[2].z = sz;
+    return m;
+}
+
 //******************************************************************************
 // Private Interface
 //******************************************************************************
@@ -71,8 +150,23 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
 @property (nonatomic, strong) id<MTLDevice> device;
 @property (nonatomic, strong) id<MTLCommandQueue> commandQueue;
 @property (nonatomic, strong) id<MTLRenderPipelineState> pipelineState;
+@property (nonatomic, strong) id<MTLDepthStencilState> depthStencilState;
+@property (nonatomic, strong) id<MTLTexture> depthTexture;
 @property (nonatomic, weak) CAMetalLayer *metalLayer;
 @property (nonatomic, assign) float aspect;
+
+// Mesh resources loaded from binary file
+@property (nonatomic, strong) id<MTLBuffer> vertexBuffer;
+@property (nonatomic, strong) id<MTLBuffer> meshletBuffer;
+@property (nonatomic, strong) id<MTLBuffer> vertMapBuffer;
+@property (nonatomic, strong) id<MTLBuffer> indicesBuffer;
+@property (nonatomic, assign) uint64_t verticesCount;
+@property (nonatomic, assign) uint64_t meshletsCount;
+@property (nonatomic, assign) BOOL hasMesh;
+
+// Auto-centering and scaling properties
+@property (nonatomic, assign) simd_float3 meshCenter;
+@property (nonatomic, assign) float meshScale;
 
 @end
 
@@ -87,6 +181,10 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
     if (!self) {
         return nil;
     }
+
+    // Reset/clear render_log.txt on renderer initialization
+    NSString *logPath = [GetProjectRootDir() stringByAppendingPathComponent:@"render_log.txt"];
+    [[NSData data] writeToFile:logPath atomically:YES];
 
     _device = MTLCreateSystemDefaultDevice();
     if (!_device) {
@@ -125,21 +223,40 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
 
     // Load mesh and fragment shader functions
     id<MTLFunction> meshFunction = [library newFunctionWithName:@"hello_triangle_mesh_main"];
+    id<MTLFunction> meshMainFunction = [library newFunctionWithName:@"hello_mesh_main"];
     id<MTLFunction> fragmentFunction = [library newFunctionWithName:@"hello_triangle_fragment_main"];
 
     // Pipeline descriptor setup using Mesh Pipeline State
     MTLMeshRenderPipelineDescriptor *descriptor = [[MTLMeshRenderPipelineDescriptor alloc] init];
-    descriptor.meshFunction = meshFunction;
+    descriptor.meshFunction = meshMainFunction;
     descriptor.fragmentFunction = fragmentFunction;
     descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+    descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
     _pipelineState = [_device newRenderPipelineStateWithMeshDescriptor:descriptor 
                                                                options:MTLPipelineOptionNone 
                                                             reflection:nil 
                                                                  error:error];
     if (!_pipelineState) {
+        if (error && *error) {
+            TMLog(@"[Renderer] Error: Failed to create Mesh Render Pipeline State: %@", (*error).localizedDescription);
+        } else {
+            TMLog(@"[Renderer] Error: Failed to create Mesh Render Pipeline State.");
+        }
         return nil;
     }
+    
+    MTLDepthStencilDescriptor* dsDescriptor = [[MTLDepthStencilDescriptor alloc] init];
+    dsDescriptor.depthCompareFunction = MTLCompareFunctionLess;
+    dsDescriptor.depthWriteEnabled = YES;
+    _depthStencilState = [_device newDepthStencilStateWithDescriptor:dsDescriptor];
+
+
+    TMLog(@"[Renderer] Successfully created Mesh Render Pipeline State.");
+    TMLog(@"[Renderer] TMMeshVertex size: %zu", sizeof(TMMeshVertex));
+    TMLog(@"[Renderer]   position offset: %zu", offsetof(TMMeshVertex, position));
+    TMLog(@"[Renderer]   uv offset: %zu", offsetof(TMMeshVertex, uv));
+    TMLog(@"[Renderer]   normal offset: %zu", offsetof(TMMeshVertex, normal));
 
     _metalLayer = metalLayer;
     _metalLayer.device = _device;
@@ -152,6 +269,15 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
     _cameraPitch = 0.0f;
     _aspect = 1.5f;
 
+    // load the 3D model now
+    NSError* meshloadError = nil;
+    BOOL loaded = [self loadMeshFromBinaryFile:@"./data/bunny.bin" error:&meshloadError];
+    if (loaded) {
+        TMLog(@"[Renderer] Mesh loaded successfully on init.");
+    } else {
+        TMLog(@"[Renderer] Error: Failed to load mesh on init. Error: %@", meshloadError.localizedDescription);
+    }
+
     return self;
 }
 
@@ -159,6 +285,15 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
 {
     self.metalLayer.drawableSize = size;
     self.aspect = (float)size.width / (float)size.height;
+
+    // recreate the depth whenever window size changes
+    MTLTextureDescriptor* depthTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+                                                width:size.width
+                                                height:size.height
+                                                mipmapped:NO];
+    depthTexDesc.storageMode = MTLStorageModePrivate;
+    depthTexDesc.usage = MTLTextureUsageRenderTarget;
+    self.depthTexture = [self.device newTextureWithDescriptor:depthTexDesc];
 }
 
 - (void)draw
@@ -180,6 +315,10 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
     renderPass.colorAttachments[0].loadAction = MTLLoadActionClear;
     renderPass.colorAttachments[0].storeAction = MTLStoreActionStore;
     renderPass.colorAttachments[0].clearColor = MTLClearColorMake(0.08, 0.09, 0.12, 1.0);
+    renderPass.depthAttachment.texture = self.depthTexture;
+    renderPass.depthAttachment.clearDepth = 1.0f;
+    renderPass.depthAttachment.loadAction = MTLLoadActionClear;
+    renderPass.depthAttachment.storeAction = MTLStoreActionStore;
 
     // Build Model, View, and Projection (MVP) matrices
     simd_float3 pos = self.cameraPosition;
@@ -197,7 +336,24 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
     // Model rotation over time to show 3D effect
     static float angle = 0.0f;
     angle += 0.005f;
-    simd_float4x4 modelMatrix = matrix_rotation_y(angle);
+    
+    simd_float4x4 modelMatrix;
+    if (self.hasMesh) {
+        // Center, scale, and rotate the mesh
+        simd_float4x4 scaleMatrix = matrix_scale(self.meshScale, self.meshScale, self.meshScale);
+        simd_float4x4 translateMatrix = matrix_translation(-self.meshCenter.x, -self.meshCenter.y, -self.meshCenter.z);
+        // Combine: Model = Rotation * Scale * Translation
+        modelMatrix = simd_mul(matrix_rotation_y(angle), simd_mul(scaleMatrix, translateMatrix));
+    } else {
+        modelMatrix = matrix_rotation_y(angle);
+    }
+
+    static BOOL loggedFirstDraw = NO;
+    if (self.hasMesh && !loggedFirstDraw) {
+        loggedFirstDraw = YES;
+        TMLog(@"[Renderer] First draw call with mesh: %llu meshlets, %llu vertices.", self.meshletsCount, self.verticesCount);
+        TMLog(@"[Renderer] Center applied: (%f, %f, %f), Scale applied: %f", self.meshCenter.x, self.meshCenter.y, self.meshCenter.z, self.meshScale);
+    }
 
     TMUniforms uniforms;
     uniforms.modelMatrix = modelMatrix;
@@ -208,20 +364,203 @@ static inline simd_float4x4 matrix_perspective_fov(float fovRadians, float aspec
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
     
     [encoder setRenderPipelineState:self.pipelineState];
-    [encoder setMeshBytes:triangleVertices length:sizeof(triangleVertices) atIndex:0];
+    [encoder setDepthStencilState:self.depthStencilState];
+    [encoder setCullMode:MTLCullModeBack];
+    [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
     [encoder setMeshBytes:&uniforms length:sizeof(uniforms) atIndex:1];
    
-    MTLSize threadGroups = MTLSizeMake(1, 1, 1);
-    MTLSize threadsPerMesh = MTLSizeMake(128, 1, 1);
+    if (self.hasMesh) {
+        [encoder setMeshBuffer:self.vertexBuffer offset:0 atIndex:0];
+        [encoder setMeshBuffer:self.meshletBuffer offset:0 atIndex:2];
+        [encoder setMeshBuffer:self.vertMapBuffer offset:0 atIndex:3];
+        [encoder setMeshBuffer:self.indicesBuffer offset:0 atIndex:4];
 
-    [encoder drawMeshThreadgroups:threadGroups 
-      threadsPerObjectThreadgroup:MTLSizeMake(0, 0, 0) 
-        threadsPerMeshThreadgroup:threadsPerMesh];
+        MTLSize threadGroups = MTLSizeMake(self.meshletsCount, 1, 1);
+        MTLSize threadsPerMesh = MTLSizeMake(128, 1, 1);
+
+        [encoder drawMeshThreadgroups:threadGroups 
+            threadsPerObjectThreadgroup:MTLSizeMake(0, 0, 0) 
+            threadsPerMeshThreadgroup:threadsPerMesh];
+    }
 
     [encoder endEncoding];
 
     [commandBuffer presentDrawable:drawable];
     [commandBuffer commit];
+}
+
+- (BOOL)loadMeshFromBinaryFile:(NSString *)filepath error:(NSError * _Nullable * _Nullable)error
+{
+    TMLog(@"[Renderer] Attempting to load mesh from binary file: %@", filepath);
+    TMLog(@"[Renderer] Current working directory: %@", [NSFileManager defaultManager].currentDirectoryPath);
+
+    const char *path = [filepath UTF8String];
+    FILE *file = NULL;
+    NSString *resolvedPath = filepath;
+
+    // 1. Try directly (works if we run from terminal in project directory)
+    file = fopen(path, "rb");
+
+    // 2. Try walking up from bundle directory to find the file in project directory or build folders
+    if (!file) {
+        NSString *bundleDir = [[NSBundle mainBundle] bundlePath];
+        NSString *currentSearchDir = bundleDir;
+        for (int i = 0; i < 10; i++) {
+            NSString *checkPath = [currentSearchDir stringByAppendingPathComponent:filepath];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:checkPath]) {
+                resolvedPath = checkPath;
+                file = fopen([resolvedPath UTF8String], "rb");
+                if (file) {
+                    TMLog(@"[Renderer] Found mesh file via directory walk at: %@", resolvedPath);
+                    break;
+                }
+            }
+            currentSearchDir = [currentSearchDir stringByDeletingLastPathComponent];
+            if ([currentSearchDir isEqualToString:@"/"] || currentSearchDir.length == 0) {
+                break;
+            }
+        }
+    }
+
+    // 3. Try resource bundle (if copied as app resource)
+    if (!file) {
+        NSString *filename = [filepath lastPathComponent];
+        NSString *nameOnly = [filename stringByDeletingPathExtension];
+        NSString *ext = [filename pathExtension];
+        NSString *resourcePath = [[NSBundle mainBundle] pathForResource:nameOnly ofType:ext];
+        if (resourcePath) {
+            resolvedPath = resourcePath;
+            TMLog(@"[Renderer] Trying bundle resource path: %@", resolvedPath);
+            file = fopen([resolvedPath UTF8String], "rb");
+        }
+    }
+
+    if (!file) {
+        TMLog(@"[Renderer] Error: Failed to open binary file '%@' at any path.", filepath);
+        if (error) {
+            *error = [NSError errorWithDomain:@"com.example.tinymetal"
+                                         code:101
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to open file: %@", filepath]}];
+        }
+        return NO;
+    }
+    TMLog(@"[Renderer] Successfully opened binary file at path: %@", resolvedPath);
+
+    // 1. Read vertices size/count
+    uint64_t verticesCount = 0;
+    if (fread(&verticesCount, sizeof(verticesCount), 1, file) != 1) {
+        TMLog(@"[Renderer] Error: Failed to read vertices count.");
+        fclose(file);
+        return NO;
+    }
+    TMLog(@"[Renderer] Reading %llu vertices...", verticesCount);
+    
+    // Allocate GPU buffer for vertices
+    size_t vertexBufferSize = verticesCount * sizeof(TMMeshVertex);
+    self.vertexBuffer = [self.device newBufferWithLength:vertexBufferSize options:MTLResourceStorageModeShared];
+    if (fread(self.vertexBuffer.contents, sizeof(TMMeshVertex), verticesCount, file) != verticesCount) {
+        TMLog(@"[Renderer] Error: Failed to read vertex data.");
+        fclose(file);
+        return NO;
+    }
+    // Update the global vertex count
+    self.verticesCount = verticesCount;
+
+    // Log the first 5 vertices as a sanity check
+    TMMeshVertex *vertsTemp = (TMMeshVertex *)self.vertexBuffer.contents;
+    for (int i = 0; i < 5 && i < verticesCount; ++i) {
+        TMLog(@"[Renderer] Vertex[%d]: pos=(%f, %f, %f), uv=(%f, %f), normal=(%f, %f, %f)",
+              i, vertsTemp[i].position.x, vertsTemp[i].position.y, vertsTemp[i].position.z,
+              vertsTemp[i].uv.x, vertsTemp[i].uv.y,
+              vertsTemp[i].normal.x, vertsTemp[i].normal.y, vertsTemp[i].normal.z);
+    }
+
+    // 2. Read meshlets size/count
+    uint64_t meshletCount = 0;
+    if (fread(&meshletCount, sizeof(meshletCount), 1, file) != 1) {
+        TMLog(@"[Renderer] Error: Failed to read meshlet count.");
+        fclose(file);
+        return NO;
+    }
+    TMLog(@"[Renderer] Reading %llu meshlets...", meshletCount);
+
+    size_t meshletBufferSize = meshletCount * sizeof(TMMeshlet);
+    self.meshletBuffer = [self.device newBufferWithLength:meshletBufferSize options:MTLResourceStorageModeShared];
+    if (fread(self.meshletBuffer.contents, sizeof(TMMeshlet), meshletCount, file) != meshletCount) {
+        TMLog(@"[Renderer] Error: Failed to read meshlet data.");
+        fclose(file);
+        return NO;
+    }
+    
+    // Update the global meshlets count
+    self.meshletsCount = meshletCount;
+
+    // 3. Read vertex map size/count
+    uint64_t vertMapCount = 0;
+    if (fread(&vertMapCount, sizeof(vertMapCount), 1, file) != 1) {
+        TMLog(@"[Renderer] Error: Failed to read vertex map count.");
+        fclose(file);
+        return NO;
+    }
+    TMLog(@"[Renderer] Reading %llu vertex map entries...", vertMapCount);
+
+    size_t vertMapBufferSize = vertMapCount * sizeof(uint32_t);
+    self.vertMapBuffer = [self.device newBufferWithLength:vertMapBufferSize options:MTLResourceStorageModeShared];
+    if (fread(self.vertMapBuffer.contents, sizeof(uint32_t), vertMapCount, file) != vertMapCount) {
+        TMLog(@"[Renderer] Error: Failed to read vertex map data.");
+        fclose(file);
+        return NO;
+    }
+
+    // 4. Read local indices size/count
+    uint64_t indicesCount = 0;
+    if (fread(&indicesCount, sizeof(indicesCount), 1, file) != 1) {
+        TMLog(@"[Renderer] Error: Failed to read local indices count.");
+        fclose(file);
+        return NO;
+    }
+    TMLog(@"[Renderer] Reading %llu local indices...", indicesCount);
+
+    size_t indicesBufferSize = indicesCount * sizeof(uint32_t);
+    self.indicesBuffer = [self.device newBufferWithLength:indicesBufferSize options:MTLResourceStorageModeShared];
+    if (fread(self.indicesBuffer.contents, sizeof(uint32_t), indicesCount, file) != indicesCount) {
+        TMLog(@"[Renderer] Error: Failed to read local index data.");
+        fclose(file);
+        return NO;
+    }
+
+    fclose(file);
+    self.hasMesh = YES;
+
+    // Compute bounding box and scaling/centering factors
+    simd_float3 minBounds = (simd_float3){INFINITY, INFINITY, INFINITY};
+    simd_float3 maxBounds = (simd_float3){-INFINITY, -INFINITY, -INFINITY};
+    TMMeshVertex *verts = (TMMeshVertex *)self.vertexBuffer.contents;
+    for (uint64_t i = 0; i < verticesCount; ++i) {
+        simd_float3 p = verts[i].position;
+        minBounds = simd_min(minBounds, p);
+        maxBounds = simd_max(maxBounds, p);
+    }
+    self.meshCenter = (minBounds + maxBounds) * 0.5f;
+    
+    float maxDim = maxBounds.x - minBounds.x;
+    if (maxBounds.y - minBounds.y > maxDim) maxDim = maxBounds.y - minBounds.y;
+    if (maxBounds.z - minBounds.z > maxDim) maxDim = maxBounds.z - minBounds.z;
+    
+    if (maxDim > 0.0001f) {
+        self.meshScale = 2.0f / maxDim; // Normalize largest dimension to 2.0 units
+    } else {
+        self.meshScale = 1.0f;
+    }
+
+    TMLog(@"[Renderer] Mesh loaded successfully:");
+    TMLog(@"[Renderer]   Vertices: %llu", verticesCount);
+    TMLog(@"[Renderer]   Meshlets: %llu", self.meshletsCount);
+    TMLog(@"[Renderer]   Min Bounds: (%f, %f, %f)", minBounds.x, minBounds.y, minBounds.z);
+    TMLog(@"[Renderer]   Max Bounds: (%f, %f, %f)", maxBounds.x, maxBounds.y, maxBounds.z);
+    TMLog(@"[Renderer]   Center: (%f, %f, %f)", self.meshCenter.x, self.meshCenter.y, self.meshCenter.z);
+    TMLog(@"[Renderer]   Scale Factor applied: %f (Bunny normalized to 2.0 units)", self.meshScale);
+    return YES;
 }
 
 @end

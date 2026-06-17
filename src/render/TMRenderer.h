@@ -15,6 +15,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)drawableSizeWillChange:(CGSize)size;
 - (void)draw;
 
+- (BOOL)loadMeshFromBinaryFile:(NSString *)filepath error:(NSError * _Nullable * _Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END
