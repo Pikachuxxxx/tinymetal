@@ -269,13 +269,25 @@ static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
     _cameraPitch = 0.0f;
     _aspect = 1.5f;
 
+    // Parse command line arguments for a custom model path
+    NSString *modelPath = @"./data/bunny.bin"; // Default
+    NSArray<NSString *> *arguments = [[NSProcessInfo processInfo] arguments];
+    for (NSUInteger i = 0; i < arguments.count; i++) {
+        if ([arguments[i] isEqualToString:@"--model"] || [arguments[i] isEqualToString:@"-m"] || [arguments[i] isEqualToString:@"--input"] || [arguments[i] isEqualToString:@"-i"]) {
+            if (i + 1 < arguments.count) {
+                modelPath = arguments[i + 1];
+                break;
+            }
+        }
+    }
+
     // load the 3D model now
     NSError* meshloadError = nil;
-    BOOL loaded = [self loadMeshFromBinaryFile:@"./data/bunny.bin" error:&meshloadError];
+    BOOL loaded = [self loadMeshFromBinaryFile:modelPath error:&meshloadError];
     if (loaded) {
-        TMLog(@"[Renderer] Mesh loaded successfully on init.");
+        TMLog(@"[Renderer] Mesh loaded successfully on init. Model: %@", modelPath);
     } else {
-        TMLog(@"[Renderer] Error: Failed to load mesh on init. Error: %@", meshloadError.localizedDescription);
+        TMLog(@"[Renderer] Error: Failed to load mesh on init. Model: %@, Error: %@", modelPath, meshloadError.localizedDescription);
     }
 
     return self;
