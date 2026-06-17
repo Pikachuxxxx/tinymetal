@@ -338,26 +338,21 @@ static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
     float pitch = self.cameraPitch;
     
     simd_float4x4 translation = matrix_translation(-pos.x, -pos.y, -pos.z);
-    simd_float4x4 rotationY = matrix_rotation_y(-yaw);
+    simd_float4x4 rotationY = matrix_rotation_y(yaw);
     simd_float4x4 rotationX = matrix_rotation_x(-pitch);
     simd_float4x4 viewMatrix = simd_mul(rotationX, simd_mul(rotationY, translation));
     
     float fov = 65.0f * (M_PI / 180.0f); // 65-degree FOV
     simd_float4x4 projectionMatrix = matrix_perspective_fov(fov, self.aspect, 0.1f, 100.0f);
     
-    // Model rotation over time to show 3D effect
-    static float angle = 0.0f;
-    angle += 0.005f;
-    
+    // Keep model stationary at the origin
     simd_float4x4 modelMatrix;
     if (self.hasMesh) {
-        // Center, scale, and rotate the mesh
         simd_float4x4 scaleMatrix = matrix_scale(self.meshScale, self.meshScale, self.meshScale);
         simd_float4x4 translateMatrix = matrix_translation(-self.meshCenter.x, -self.meshCenter.y, -self.meshCenter.z);
-        // Combine: Model = Rotation * Scale * Translation
-        modelMatrix = simd_mul(matrix_rotation_y(angle), simd_mul(scaleMatrix, translateMatrix));
+        modelMatrix = simd_mul(scaleMatrix, translateMatrix);
     } else {
-        modelMatrix = matrix_rotation_y(angle);
+        modelMatrix = matrix_identity_float4x4;
     }
 
     static BOOL loggedFirstDraw = NO;

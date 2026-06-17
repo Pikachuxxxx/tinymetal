@@ -16,6 +16,7 @@
 @property (atomic, assign) BOOL keyA;
 @property (atomic, assign) BOOL keyS;
 @property (atomic, assign) BOOL keyD;
+@property (nonatomic, assign) BOOL mouseCaptured;
 
 @end
 
@@ -23,6 +24,52 @@
 // Implementation
 //******************************************************************************
 @implementation TMMacMetalView
+
+//******************************************************************************
+// Mouse Capture Helpers
+//******************************************************************************
+- (void)captureMouse {
+    if (!self.mouseCaptured) {
+        self.mouseCaptured = YES;
+        [NSCursor hide];
+        CGAssociateMouseAndMouseCursorPosition(NO);
+        if (self.window) {
+            NSRect frame = [self.window convertRectToScreen:[self convertRect:self.bounds toView:nil]];
+            CGPoint center = CGPointMake(NSMidX(frame), NSMidY(frame));
+            NSScreen *primaryScreen = [NSScreen screens].firstObject;
+            CGFloat screenHeight = primaryScreen.frame.size.height;
+            CGPoint warpPoint = CGPointMake(center.x, screenHeight - center.y);
+            CGWarpMouseCursorPosition(warpPoint);
+        }
+    }
+}
+
+- (void)releaseMouse {
+    if (self.mouseCaptured) {
+        self.mouseCaptured = NO;
+        CGAssociateMouseAndMouseCursorPosition(YES);
+        [NSCursor unhide];
+    }
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    [super mouseDown:event];
+    [self captureMouse];
+}
+
+- (void)viewWillMoveToWindow:(NSWindow *)newWindow {
+    [super viewWillMoveToWindow:newWindow];
+    if (self.window) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidResignKeyNotification object:self.window];
+    }
+    if (newWindow) {
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidResignKey:) name:NSWindowDidResignKeyNotification object:newWindow];
+    }
+}
+
+- (void)windowDidResignKey:(NSNotification *)notification {
+    [self releaseMouse];
+}
 
 //******************************************************************************
 // Lifecycle
@@ -66,6 +113,7 @@
 - (void)dealloc
 {
     _running = NO;
+    [self releaseMouse];
 }
 
 //******************************************************************************
@@ -75,6 +123,10 @@
 {
     [super viewDidMoveToWindow];
     [self updateDrawableSize];
+    if (self.window) {
+        self.window.acceptsMouseMovedEvents = YES;
+        [self captureMouse];
+    }
 }
 
 - (void)layout
@@ -89,8 +141,12 @@
 
 - (void) keyDown:(NSEvent *)event {
     if (event.keyCode == 53) { // ESC key
-        _running = NO; 
-        [NSApp terminate:self];
+        if (self.mouseCaptured) {
+            [self releaseMouse];
+        } else {
+            _running = NO; 
+            [NSApp terminate:self];
+        }
     } else {
         NSString *chars = event.charactersIgnoringModifiers;
         if (chars.length > 0) {
@@ -116,18 +172,24 @@
     [super keyUp:event];
 }
 
+- (void) mouseMoved:(NSEvent *)event {
+    if (self.mouseCaptured) {
+        float sensitivity = 0.0015f;
+        float yaw = self.renderer.cameraYaw + event.deltaX * sensitivity;
+        float pitch = self.renderer.cameraPitch - event.deltaY * sensitivity;
+        
+        // Clamp pitch to avoid flipping upside down (-89 to +89 degrees)
+        float limit = 89.0f * (M_PI / 180.0f);
+        if (pitch > limit) pitch = limit;
+        if (pitch < -limit) pitch = -limit;
+        
+        self.renderer.cameraYaw = yaw;
+        self.renderer.cameraPitch = pitch;
+    }
+}
+
 - (void) mouseDragged:(NSEvent *)event {
-    float sensitivity = 0.003f;
-    float yaw = self.renderer.cameraYaw + event.deltaX * sensitivity;
-    float pitch = self.renderer.cameraPitch - event.deltaY * sensitivity;
-    
-    // Clamp pitch to avoid flipping upside down (-89 to +89 degrees)
-    float limit = 89.0f * (M_PI / 180.0f);
-    if (pitch > limit) pitch = limit;
-    if (pitch < -limit) pitch = -limit;
-    
-    self.renderer.cameraYaw = yaw;
-    self.renderer.cameraPitch = pitch;
+    [self mouseMoved:event];
 }
 
 //******************************************************************************
@@ -164,12 +226,13 @@
                 float speed = 2.5f; // Units per second
                 simd_float3 pos = self.renderer.cameraPosition;
                 float yaw = self.renderer.cameraYaw;
+                float pitch = self.renderer.cameraPitch;
                 
-                // Compute movement vectors in XZ plane
+                // Compute movement vectors in 3D space based on yaw and pitch
                 simd_float3 forward;
-                forward.x = sinf(yaw);
-                forward.y = 0.0f;
-                forward.z = -cosf(yaw);
+                forward.x = sinf(yaw) * cosf(pitch);
+                forward.y = sinf(pitch);
+                forward.z = -cosf(yaw) * cosf(pitch);
                 if (simd_length(forward) > 0.0f) {
                     forward = simd_normalize(forward);
                 }
