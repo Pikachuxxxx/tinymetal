@@ -117,11 +117,15 @@ struct Uniforms
 
         if (uniforms.renderMode == 1) // Meshlets
         {
-            outVertex.color = float4(
-                float(gid & 1),
-                float(gid & 3) / 4.0f,
-                float(gid & 7) / 8.0f,
-                1.0f);
+
+            uint h = gid * 0xF56A72FBu + 1013904223u;
+
+            float3 color = float3(
+                (h & 255) / 255.0f,
+                ((h >> 8) & 255) / 255.0f,
+                ((h >> 16) & 255) / 255.0f);
+
+            outVertex.color = float4(color, 1.0f);
         }
         else if (uniforms.renderMode == 2) // UV Coordinates
         {
