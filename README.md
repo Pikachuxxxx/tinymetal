@@ -1,5 +1,10 @@
 # TinyMetal
 
+Metal sandbox to play with mesh shaders and basic culling for macOS and iOS
+
+![](./sponza.png)
+![](./bmw.png)
+
 Minimal native Metal boilerplate for Apple platforms with:
 
 - Objective-C app code
