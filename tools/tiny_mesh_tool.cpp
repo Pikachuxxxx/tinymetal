@@ -1,7 +1,7 @@
 #include <cstdio>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
@@ -13,28 +13,30 @@
 //******************************************************************************
 // TYPE ALIASES & DEFINES
 //******************************************************************************
-template <typename T>
-using vector_t = std::vector<T>;
-using string_t = std::string;
+template <typename T> using vector_t = std::vector<T>;
+using string_t                       = std::string;
 
 #define MESHLETS_OPTIMAL_VERTICES 64
-#define MESHLETS_OPTMIAL_PRIMS    124
+#define MESHLETS_OPTMIAL_PRIMS 124
 
 #define ALIGN(x, a) (((x) + ((a) - 1)) & ~((a) - 1))
 
 // Simple logging macro mimicking NSLog for standard console output
-#define NSLog(...) { std::printf(__VA_ARGS__); std::printf("\n"); }
+#define NSLog(...)                                                                                                     \
+    {                                                                                                                  \
+        std::printf(__VA_ARGS__);                                                                                      \
+        std::printf("\n");                                                                                             \
+    }
 
 //******************************************************************************
 // DUMMY STRUCTS & CONFIGS
 //******************************************************************************
-struct TMMeshletBounds
-{
+struct TMMeshletBounds {
     glm::vec3 center;
-    float radius;
+    float     radius;
     glm::vec3 cone_apex;
     glm::vec3 cone_axis;
-    float cone_cutoff;
+    float     cone_cutoff;
 };
 
 //******************************************************************************
@@ -51,92 +53,79 @@ struct TMMeshletBounds
 // - [x] export all final VB + IB + meshlets to *.bin files
 // - [x] Print all stats
 
-struct Vertex 
-{
+struct Vertex {
     glm::vec3 pos;
-    float pad1 = 0.0f;
+    float     pad1 = 0.0f;
     glm::vec2 uv;
-    float pad2[2] = { 0.0f, 0.0f };
+    float     pad2[2] = {0.0f, 0.0f};
     glm::vec3 normal;
-    float pad3 = 0.0f;
+    float     pad3 = 0.0f;
 };
 
-struct VertexKey
-{
+struct VertexKey {
     int32_t pos;
     int32_t uv;
     int32_t normal;
 
-    bool operator==(const VertexKey& other) const
-    {
+    bool operator==(const VertexKey &other) const {
         return pos == other.pos && uv == other.uv && normal == other.normal;
     }
 };
 
-struct VertexKeyHash
-{
-    size_t operator()(const VertexKey& key) const 
-    {
+struct VertexKeyHash {
+    size_t operator()(const VertexKey &key) const {
         size_t h = std::hash<int>{}(key.pos);
-        h ^= std::hash<int>{}(key.uv)     + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(key.uv) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<int>{}(key.normal) + 0x9e3779b9 + (h << 6) + (h >> 2);
         return h;
     }
 };
 
-struct TinyObjData
-{
-    tinyobj::attrib_t attrib;
-    vector_t<tinyobj::shape_t> shapes;
+struct TinyObjData {
+    tinyobj::attrib_t             attrib;
+    vector_t<tinyobj::shape_t>    shapes;
     vector_t<tinyobj::material_t> materials;
 };
 
-struct MeshGeometry
-{
-    vector_t<Vertex> vertices;
+struct MeshGeometry {
+    vector_t<Vertex>   vertices;
     vector_t<uint32_t> indices;
 };
 
-struct BoundingSphere
-{
+struct BoundingSphere {
     glm::vec3 center;
-    float radius;
+    float     radius;
 };
 
-struct MeshletData
-{
+struct MeshletData {
     vector_t<meshopt_Meshlet> meshlets;
-    vector_t<uint32_t> vertex_map;
-    vector_t<uint32_t> packed_indices;
-    vector_t<BoundingSphere> spheres;
+    vector_t<uint32_t>        vertex_map;
+    vector_t<uint32_t>        packed_indices;
+    vector_t<BoundingSphere>  spheres;
 };
 
 // Encapsulates geometry and meshlets together for safe return and saving
-struct SaveMeshData
-{
+struct SaveMeshData {
     MeshGeometry geometry;
-    MeshletData meshlet_data;
+    MeshletData  meshlet_data;
 };
 
-struct SaveMeshBinFileOpts
-{
-    string_t filepath;
-    const MeshGeometry& geometry;
-    const MeshletData& meshlet_data;
+struct SaveMeshBinFileOpts {
+    string_t            filepath;
+    const MeshGeometry &geometry;
+    const MeshletData  &meshlet_data;
 };
 
-struct LoadMeshBinFileOpts
-{
+struct LoadMeshBinFileOpts {
     MeshGeometry geometry;
-    MeshletData meshlet_data;
-    bool has_spheres = false;
+    MeshletData  meshlet_data;
+    bool         has_spheres = false;
 };
 
 //******************************************************************************
 // Help Menu
 //******************************************************************************
-void print_usage(const char* program_name)
-{
+void print_usage(const char *program_name) {
     std::printf("================================================================================\n");
     std::printf("  TinyMeshTool Options\n");
     std::printf("================================================================================\n");
@@ -151,126 +140,147 @@ void print_usage(const char* program_name)
 //******************************************************************************
 // Block Writing Helpers
 //******************************************************************************
-bool write_vertices(std::FILE* file, const vector_t<Vertex>& vertices)
-{
+bool write_vertices(std::FILE *file, const vector_t<Vertex> &vertices) {
     uint64_t size = vertices.size();
-    if (std::fwrite(&size, sizeof(size), 1, file) != 1) return false;
-    if (std::fwrite(vertices.data(), sizeof(Vertex), vertices.size(), file) != vertices.size()) return false;
+    if (std::fwrite(&size, sizeof(size), 1, file) != 1)
+        return false;
+    if (std::fwrite(vertices.data(), sizeof(Vertex), vertices.size(), file) != vertices.size())
+        return false;
     return true;
 }
 
-bool write_meshlets(std::FILE* file, const vector_t<meshopt_Meshlet>& meshlets)
-{
+bool write_meshlets(std::FILE *file, const vector_t<meshopt_Meshlet> &meshlets) {
     uint64_t size = meshlets.size();
-    if (std::fwrite(&size, sizeof(size), 1, file) != 1) return false;
-    if (std::fwrite(meshlets.data(), sizeof(meshopt_Meshlet), meshlets.size(), file) != meshlets.size()) return false;
+    if (std::fwrite(&size, sizeof(size), 1, file) != 1)
+        return false;
+    if (std::fwrite(meshlets.data(), sizeof(meshopt_Meshlet), meshlets.size(), file) != meshlets.size())
+        return false;
     return true;
 }
 
-bool write_vertex_map(std::FILE* file, const vector_t<uint32_t>& meshletVertMap)
-{
+bool write_vertex_map(std::FILE *file, const vector_t<uint32_t> &meshletVertMap) {
     uint64_t size = meshletVertMap.size();
-    if (std::fwrite(&size, sizeof(size), 1, file) != 1) return false;
-    if (std::fwrite(meshletVertMap.data(), sizeof(uint32_t), meshletVertMap.size(), file) != meshletVertMap.size()) return false;
+    if (std::fwrite(&size, sizeof(size), 1, file) != 1)
+        return false;
+    if (std::fwrite(meshletVertMap.data(), sizeof(uint32_t), meshletVertMap.size(), file) != meshletVertMap.size())
+        return false;
     return true;
 }
 
-bool write_indices(std::FILE* file, const vector_t<uint32_t>& meshletIndices)
-{
+bool write_indices(std::FILE *file, const vector_t<uint32_t> &meshletIndices) {
     uint64_t size = meshletIndices.size();
-    if (std::fwrite(&size, sizeof(size), 1, file) != 1) return false;
-    if (std::fwrite(meshletIndices.data(), sizeof(uint32_t), meshletIndices.size(), file) != meshletIndices.size()) return false;
+    if (std::fwrite(&size, sizeof(size), 1, file) != 1)
+        return false;
+    if (std::fwrite(meshletIndices.data(), sizeof(uint32_t), meshletIndices.size(), file) != meshletIndices.size())
+        return false;
     return true;
 }
 
-bool write_bounding_spheres(std::FILE* file, const vector_t<BoundingSphere>& spheres)
-{
+bool write_bounding_spheres(std::FILE *file, const vector_t<BoundingSphere> &spheres) {
     uint64_t size = spheres.size();
-    if (std::fwrite(&size, sizeof(size), 1, file) != 1) return false;
-    if (std::fwrite(spheres.data(), sizeof(BoundingSphere), spheres.size(), file) != spheres.size()) return false;
+    if (std::fwrite(&size, sizeof(size), 1, file) != 1)
+        return false;
+    if (std::fwrite(spheres.data(), sizeof(BoundingSphere), spheres.size(), file) != spheres.size())
+        return false;
     return true;
 }
 
 //******************************************************************************
 // Block Reading Helpers
 //******************************************************************************
-bool read_vertices(std::FILE* file, vector_t<Vertex>& vertices)
-{
+bool read_vertices(std::FILE *file, vector_t<Vertex> &vertices) {
     uint64_t size = 0;
-    if (std::fread(&size, sizeof(size), 1, file) != 1) return false;
+    if (std::fread(&size, sizeof(size), 1, file) != 1)
+        return false;
     vertices.resize(size);
-    if (std::fread(vertices.data(), sizeof(Vertex), size, file) != size) return false;
+    if (std::fread(vertices.data(), sizeof(Vertex), size, file) != size)
+        return false;
     return true;
 }
 
-bool read_meshlets(std::FILE* file, vector_t<meshopt_Meshlet>& meshlets)
-{
+bool read_meshlets(std::FILE *file, vector_t<meshopt_Meshlet> &meshlets) {
     uint64_t size = 0;
-    if (std::fread(&size, sizeof(size), 1, file) != 1) return false;
+    if (std::fread(&size, sizeof(size), 1, file) != 1)
+        return false;
     meshlets.resize(size);
-    if (std::fread(meshlets.data(), sizeof(meshopt_Meshlet), size, file) != size) return false;
+    if (std::fread(meshlets.data(), sizeof(meshopt_Meshlet), size, file) != size)
+        return false;
     return true;
 }
 
-bool read_vertex_map(std::FILE* file, vector_t<uint32_t>& meshletVertMap)
-{
+bool read_vertex_map(std::FILE *file, vector_t<uint32_t> &meshletVertMap) {
     uint64_t size = 0;
-    if (std::fread(&size, sizeof(size), 1, file) != 1) return false;
+    if (std::fread(&size, sizeof(size), 1, file) != 1)
+        return false;
     meshletVertMap.resize(size);
-    if (std::fread(meshletVertMap.data(), sizeof(uint32_t), size, file) != size) return false;
+    if (std::fread(meshletVertMap.data(), sizeof(uint32_t), size, file) != size)
+        return false;
     return true;
 }
 
-bool read_indices(std::FILE* file, vector_t<uint32_t>& meshletIndices)
-{
+bool read_indices(std::FILE *file, vector_t<uint32_t> &meshletIndices) {
     uint64_t size = 0;
-    if (std::fread(&size, sizeof(size), 1, file) != 1) return false;
+    if (std::fread(&size, sizeof(size), 1, file) != 1)
+        return false;
     meshletIndices.resize(size);
-    if (std::fread(meshletIndices.data(), sizeof(uint32_t), size, file) != size) return false;
+    if (std::fread(meshletIndices.data(), sizeof(uint32_t), size, file) != size)
+        return false;
     return true;
 }
 
-bool read_bounding_spheres(std::FILE* file, vector_t<BoundingSphere>& spheres)
-{
+bool read_bounding_spheres(std::FILE *file, vector_t<BoundingSphere> &spheres) {
     uint64_t size = 0;
-    if (std::fread(&size, sizeof(size), 1, file) != 1) return false;
+    if (std::fread(&size, sizeof(size), 1, file) != 1)
+        return false;
     spheres.resize(size);
-    if (std::fread(spheres.data(), sizeof(BoundingSphere), size, file) != size) return false;
+    if (std::fread(spheres.data(), sizeof(BoundingSphere), size, file) != size)
+        return false;
     return true;
 }
 
 //******************************************************************************
 // Main Save/Load Functions
 //******************************************************************************
-bool save_mesh_bin(const SaveMeshBinFileOpts& opts)
-{
-    std::FILE* file = std::fopen(opts.filepath.c_str(), "wb");
+bool save_mesh_bin(const SaveMeshBinFileOpts &opts) {
+    std::FILE *file = std::fopen(opts.filepath.c_str(), "wb");
     if (!file) {
         std::fprintf(stderr, "Error: Failed to open output file '%s'\n", opts.filepath.c_str());
         return false;
     }
 
-    bool ok = write_vertices(file, opts.geometry.vertices) &&
-              write_meshlets(file, opts.meshlet_data.meshlets) &&
+    bool ok = write_vertices(file, opts.geometry.vertices) && write_meshlets(file, opts.meshlet_data.meshlets) &&
               write_vertex_map(file, opts.meshlet_data.vertex_map) &&
               write_indices(file, opts.meshlet_data.packed_indices) &&
               write_bounding_spheres(file, opts.meshlet_data.spheres);
 
     std::fclose(file);
+
+    if (ok) {
+        std::printf("\n--- Exporting data ---\n");
+        std::printf("[export] Exported %zu vertices (%zu bytes)\n", opts.geometry.vertices.size(),
+                    opts.geometry.vertices.size() * sizeof(Vertex));
+        std::printf("[export] Exported %zu meshlets (%zu bytes)\n", opts.meshlet_data.meshlets.size(),
+                    opts.meshlet_data.meshlets.size() * sizeof(meshopt_Meshlet));
+        std::printf("[export] Exported %zu vertex map entries (%zu bytes)\n", opts.meshlet_data.vertex_map.size(),
+                    opts.meshlet_data.vertex_map.size() * sizeof(uint32_t));
+        std::printf("[export] Exported %zu packed index entries (%zu bytes)\n", opts.meshlet_data.packed_indices.size(),
+                    opts.meshlet_data.packed_indices.size() * sizeof(uint32_t));
+        std::printf("[export] Exported %zu bounding spheres (%zu bytes)\n", opts.meshlet_data.spheres.size(),
+                    opts.meshlet_data.spheres.size() * sizeof(BoundingSphere));
+    }
+
     return ok;
 }
 
-bool load_mesh_bin(const string_t& filepath, LoadMeshBinFileOpts& output)
-{
-    std::FILE* file = std::fopen(filepath.c_str(), "rb");
+bool load_mesh_bin(const string_t &filepath, LoadMeshBinFileOpts &output) {
+    std::FILE *file = std::fopen(filepath.c_str(), "rb");
     if (!file) {
         std::fprintf(stderr, "Error: Failed to open input file '%s'\n", filepath.c_str());
         return false;
     }
 
     output.has_spheres = false;
-    bool ok = read_vertices(file, output.geometry.vertices) &&
-              read_meshlets(file, output.meshlet_data.meshlets) &&
+    bool ok = read_vertices(file, output.geometry.vertices) && read_meshlets(file, output.meshlet_data.meshlets) &&
               read_vertex_map(file, output.meshlet_data.vertex_map) &&
               read_indices(file, output.meshlet_data.packed_indices);
 
@@ -289,26 +299,46 @@ bool load_mesh_bin(const string_t& filepath, LoadMeshBinFileOpts& output)
 //******************************************************************************
 // Pipeline Processing Functions
 //******************************************************************************
-bool load_obj_file(const string_t& filepath, TinyObjData& out_data)
-{
+bool load_obj_file(const string_t &filepath, TinyObjData &out_data) {
     std::string err;
-    bool ret = tinyobj::LoadObj(&out_data.attrib, &out_data.shapes, &out_data.materials, &err, filepath.c_str());
+    bool        ret = tinyobj::LoadObj(&out_data.attrib, &out_data.shapes, &out_data.materials, &err, filepath.c_str());
     if (!err.empty()) {
         std::printf("Load Message: %s\n", err.c_str());
+    }
+    if (ret) {
+        size_t num_vertices  = out_data.attrib.vertices.size() / 3;
+        size_t num_normals   = out_data.attrib.normals.size() / 3;
+        size_t num_texcoords = out_data.attrib.texcoords.size() / 2;
+
+        std::printf("\n--- Global Statistics ---\n");
+        std::printf("Vertices:            %zu\n", num_vertices);
+        std::printf("Normals:             %zu (attributes %s)\n", num_normals, num_normals > 0 ? "PRESENT" : "ABSENT");
+        std::printf("Texture Coordinates: %zu (attributes %s)\n", num_texcoords,
+                    num_texcoords > 0 ? "PRESENT" : "ABSENT");
+        std::printf("Shapes Count:        %zu\n", out_data.shapes.size());
+        std::printf("Materials Count:     %zu\n", out_data.materials.size());
     }
     return ret;
 }
 
-MeshGeometry build_vb_ib(const TinyObjData& input)
-{
-    MeshGeometry geom;
+MeshGeometry build_vb_ib(const TinyObjData &input) {
+    MeshGeometry                                           geom;
     std::unordered_map<VertexKey, uint32_t, VertexKeyHash> vertexIdxMap;
 
+    size_t total_indices = 0;
+    std::printf("\n--- Shapes Details ---\n");
     for (size_t s = 0; s < input.shapes.size(); ++s) {
-        const auto& shape = input.shapes[s];
+        const auto &shape         = input.shapes[s];
+        size_t      indices_count = shape.mesh.indices.size();
+        size_t      face_count    = shape.mesh.num_face_vertices.size();
+        total_indices += indices_count;
+        std::printf("  Shape[%zu]: '%s'\n", s, shape.name.c_str());
+        std::printf("    Indices:   %zu\n", indices_count);
+        std::printf("    Faces:     %zu (triangulated)\n", face_count);
+
         for (size_t i = 0; i < shape.mesh.indices.size(); ++i) {
             const tinyobj::index_t attrib_idx = shape.mesh.indices[i];
-            VertexKey key = { attrib_idx.vertex_index, attrib_idx.texcoord_index, attrib_idx.normal_index };
+            VertexKey              key = {attrib_idx.vertex_index, attrib_idx.texcoord_index, attrib_idx.normal_index};
 
             auto it = vertexIdxMap.find(key);
             if (it == vertexIdxMap.end()) {
@@ -336,7 +366,7 @@ MeshGeometry build_vb_ib(const TinyObjData& input)
                     v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
                 }
 
-                uint32_t newIdx = static_cast<uint32_t>(geom.vertices.size());
+                uint32_t newIdx   = static_cast<uint32_t>(geom.vertices.size());
                 vertexIdxMap[key] = newIdx;
                 geom.vertices.push_back(v);
                 geom.indices.push_back(newIdx);
@@ -345,34 +375,37 @@ MeshGeometry build_vb_ib(const TinyObjData& input)
             }
         }
     }
+    std::printf("\nTotal Indices across all shapes: %zu\n", total_indices);
+    std::printf("Deduplicated Vertex Count:       %zu\n", geom.vertices.size());
+    std::printf("Generated Index Count:           %zu\n", geom.indices.size());
     return geom;
 }
 
-MeshGeometry optimize_mesh(const MeshGeometry& input)
-{
+MeshGeometry optimize_mesh(const MeshGeometry &input) {
     MeshGeometry opt = input;
+    std::printf("\n--- Begin Meshopt optimization---\n");
 
     // 1. Remap vertices
     {
         vector_t<uint32_t> remappedVerticesTable(opt.vertices.size());
-        size_t vertexCount = meshopt_generateVertexRemap(
-            remappedVerticesTable.data(), 
-            opt.indices.data(), 
-            opt.indices.size(), 
-            opt.vertices.data(), 
-            opt.vertices.size(), 
-            sizeof(Vertex)
-        );
+        size_t             vertexCount =
+            meshopt_generateVertexRemap(remappedVerticesTable.data(), opt.indices.data(), opt.indices.size(),
+                                        opt.vertices.data(), opt.vertices.size(), sizeof(Vertex));
+        std::printf("[meshopt] Remapped vertices count after remapping: %zu\n", vertexCount);
+        std::printf("[meshopt] delta                                  : %zu\n", opt.vertices.size() - vertexCount);
 
         vector_t<Vertex> remappedVertices(vertexCount);
-        meshopt_remapVertexBuffer(remappedVertices.data(), opt.vertices.data(), opt.vertices.size(), sizeof(Vertex), remappedVerticesTable.data());
+        meshopt_remapVertexBuffer(remappedVertices.data(), opt.vertices.data(), opt.vertices.size(), sizeof(Vertex),
+                                  remappedVerticesTable.data());
 
         vector_t<uint32_t> remappedIndices(opt.indices.size());
-        meshopt_remapIndexBuffer(remappedIndices.data(), opt.indices.data(), opt.indices.size(), remappedVerticesTable.data());
+        meshopt_remapIndexBuffer(remappedIndices.data(), opt.indices.data(), opt.indices.size(),
+                                 remappedVerticesTable.data());
 
         opt.vertices = remappedVertices;
-        opt.indices = remappedIndices;
+        opt.indices  = remappedIndices;
     }
+    std::printf("[meshopt] Meshopt Deduplicated Vertex Count      : %zu\n", opt.vertices.size());
 
     // 2. Optimize vertex cache
     {
@@ -384,44 +417,44 @@ MeshGeometry optimize_mesh(const MeshGeometry& input)
     // 3. Optimize overdraw
     {
         vector_t<uint32_t> optimalIndices(opt.indices.size());
-        meshopt_optimizeOverdraw(optimalIndices.data(), opt.indices.data(), opt.indices.size(), opt.vertices.empty() ? NULL : &opt.vertices[0].pos.x, opt.vertices.size(), sizeof(Vertex), 1.15f);
+        meshopt_optimizeOverdraw(optimalIndices.data(), opt.indices.data(), opt.indices.size(),
+                                 opt.vertices.empty() ? NULL : &opt.vertices[0].pos.x, opt.vertices.size(),
+                                 sizeof(Vertex), 1.15f);
         opt.indices = optimalIndices;
     }
 
     // 4. Optimize vertex fetch
     {
         vector_t<Vertex> optimalVertices(opt.vertices.size());
-        size_t uniqueVertices = meshopt_optimizeVertexFetch(optimalVertices.data(), opt.indices.data(), opt.indices.size(), opt.vertices.data(), opt.vertices.size(), sizeof(Vertex));
+        size_t           uniqueVertices =
+            meshopt_optimizeVertexFetch(optimalVertices.data(), opt.indices.data(), opt.indices.size(),
+                                        opt.vertices.data(), opt.vertices.size(), sizeof(Vertex));
         optimalVertices.resize(uniqueVertices);
         opt.vertices = optimalVertices;
     }
+    std::printf("[meshopt] Optimized Vertex Count                 : %zu\n", opt.vertices.size());
+    std::printf("[meshopt] Optimized Index Count                  : %zu\n", opt.indices.size());
 
     return opt;
 }
 
-MeshletData build_meshlets(const MeshGeometry& input)
-{
+MeshletData build_meshlets(const MeshGeometry &input) {
     MeshletData data;
+    std::printf("\n--- Begin Meshlet generation---\n");
 
-    size_t maxMeshlets = meshopt_buildMeshletsBound(input.indices.size(), MESHLETS_OPTIMAL_VERTICES, MESHLETS_OPTMIAL_PRIMS);
+    size_t maxMeshlets =
+        meshopt_buildMeshletsBound(input.indices.size(), MESHLETS_OPTIMAL_VERTICES, MESHLETS_OPTMIAL_PRIMS);
+    std::printf("Max meshlets that can be generated       : %zu\n", maxMeshlets);
+
     vector_t<meshopt_Meshlet> meshlets(maxMeshlets);
-    vector_t<uint32_t> meshletVertMap(maxMeshlets * MESHLETS_OPTIMAL_VERTICES);
-    vector_t<uint8_t> meshletIndices(maxMeshlets * MESHLETS_OPTMIAL_PRIMS * 3);
+    vector_t<uint32_t>        meshletVertMap(maxMeshlets * MESHLETS_OPTIMAL_VERTICES);
+    vector_t<uint8_t>         meshletIndices(maxMeshlets * MESHLETS_OPTMIAL_PRIMS * 3);
 
-    const float coneWeight = 0.0f;
-    size_t meshletCount = meshopt_buildMeshlets(
-        meshlets.data(),
-        meshletVertMap.data(),
-        meshletIndices.data(),
-        input.indices.data(),
-        input.indices.size(),
-        input.vertices.empty() ? NULL : &input.vertices[0].pos.x,
-        input.vertices.size(),
-        sizeof(Vertex),
-        MESHLETS_OPTIMAL_VERTICES,
-        MESHLETS_OPTMIAL_PRIMS,
-        coneWeight
-    );
+    const float coneWeight   = 0.0f;
+    size_t      meshletCount = meshopt_buildMeshlets(
+        meshlets.data(), meshletVertMap.data(), meshletIndices.data(), input.indices.data(), input.indices.size(),
+        input.vertices.empty() ? NULL : &input.vertices[0].pos.x, input.vertices.size(), sizeof(Vertex),
+        MESHLETS_OPTIMAL_VERTICES, MESHLETS_OPTMIAL_PRIMS, coneWeight);
 
     if (meshletCount > 0) {
         meshopt_Meshlet lastMeshlet = meshlets[meshletCount - 1];
@@ -433,15 +466,16 @@ MeshletData build_meshlets(const MeshGeometry& input)
         meshletVertMap.clear();
         meshletIndices.clear();
     }
+    std::printf("[meshopt] Final meshlets generated: %zu\n", meshlets.size());
 
-    data.meshlets = meshlets;
+    data.meshlets   = meshlets;
     data.vertex_map = meshletVertMap;
 
     // Pack indices into uint32_t
     {
         for (uint32_t m = 0; m < meshlets.size(); ++m) {
-            size_t indexOffset = data.packed_indices.size();
-            meshopt_Meshlet& meshlet = data.meshlets[m];
+            size_t           indexOffset = data.packed_indices.size();
+            meshopt_Meshlet &meshlet     = data.meshlets[m];
 
             for (uint32_t t = 0; t < meshlet.triangle_count; ++t) {
                 uint32_t t0 = t * 3 + 0 + meshlet.triangle_offset;
@@ -450,14 +484,9 @@ MeshletData build_meshlets(const MeshGeometry& input)
 
                 uint8_t idx0 = meshletIndices[t0];
                 uint8_t idx1 = meshletIndices[t1];
-                switch (t % 1) { // unused, just keep compiler happy
-                    default: break;
-                }
                 uint8_t idx2 = meshletIndices[t2];
 
-                uint32_t packedIdx = ((idx0 & 0xFF) << 0) |
-                                     ((idx1 & 0xFF) << 8) |
-                                     ((idx2 & 0xFF) << 16);
+                uint32_t packedIdx = ((idx0 & 0xFF) << 0) | ((idx1 & 0xFF) << 8) | ((idx2 & 0xFF) << 16);
 
                 data.packed_indices.push_back(packedIdx);
             }
@@ -469,43 +498,41 @@ MeshletData build_meshlets(const MeshGeometry& input)
     return data;
 }
 
-vector_t<BoundingSphere> compute_bounding_spheres(const MeshGeometry& geometry, const MeshletData& meshlet_data)
-{
+vector_t<BoundingSphere> compute_bounding_spheres(const MeshGeometry &geometry, const MeshletData &meshlet_data) {
     vector_t<BoundingSphere> spheres(meshlet_data.meshlets.size());
 
     for (size_t i = 0; i < meshlet_data.meshlets.size(); ++i) {
-        const auto& meshlet = meshlet_data.meshlets[i];
+        const auto &meshlet = meshlet_data.meshlets[i];
         if (meshlet.vertex_count == 0) {
-            spheres[i] = { glm::vec3(0.0f), 0.0f };
+            spheres[i] = {glm::vec3(0.0f), 0.0f};
             continue;
         }
 
         glm::vec3 min_pos = geometry.vertices[meshlet_data.vertex_map[meshlet.vertex_offset]].pos;
         glm::vec3 max_pos = min_pos;
         for (uint32_t j = 1; j < meshlet.vertex_count; ++j) {
-            uint32_t v_idx = meshlet_data.vertex_map[meshlet.vertex_offset + j];
-            glm::vec3 p = geometry.vertices[v_idx].pos;
-            min_pos = glm::min(min_pos, p);
-            max_pos = glm::max(max_pos, p);
+            uint32_t  v_idx = meshlet_data.vertex_map[meshlet.vertex_offset + j];
+            glm::vec3 p     = geometry.vertices[v_idx].pos;
+            min_pos         = glm::min(min_pos, p);
+            max_pos         = glm::max(max_pos, p);
         }
 
         glm::vec3 center = (min_pos + max_pos) * 0.5f;
 
         float radius = 0.0f;
         for (uint32_t j = 0; j < meshlet.vertex_count; ++j) {
-            uint32_t v_idx = meshlet_data.vertex_map[meshlet.vertex_offset + j];
-            glm::vec3 p = geometry.vertices[v_idx].pos;
-            radius = glm::max(radius, glm::distance(center, p));
+            uint32_t  v_idx = meshlet_data.vertex_map[meshlet.vertex_offset + j];
+            glm::vec3 p     = geometry.vertices[v_idx].pos;
+            radius          = glm::max(radius, glm::distance(center, p));
         }
 
-        spheres[i] = { center, radius };
+        spheres[i] = {center, radius};
     }
 
     return spheres;
 }
 
-SaveMeshData build_export_geom(const TinyObjData& obj_data, const MeshletData& loaded_meshlets)
-{
+SaveMeshData build_export_geom(const TinyObjData &obj_data, const MeshletData &loaded_meshlets) {
     SaveMeshData result;
     result.geometry = optimize_mesh(build_vb_ib(obj_data));
     if (loaded_meshlets.meshlets.empty()) {
@@ -520,9 +547,8 @@ SaveMeshData build_export_geom(const TinyObjData& obj_data, const MeshletData& l
 //******************************************************************************
 // Entry Point
 //******************************************************************************
-int main(int argc, char* argv[])
-{
-    string_t input_path = "";
+int main(int argc, char *argv[]) {
+    string_t input_path         = "";
     string_t input_bin_to_patch = "";
 
     for (int i = 1; i < argc; ++i) {
@@ -539,7 +565,7 @@ int main(int argc, char* argv[])
             }
         } else if (arg == "-p" || arg == "--patch") {
             if (i + 1 < argc) {
-                input_bin_to_patch = argv[++i]; 
+                input_bin_to_patch = argv[++i];
             } else {
                 std::fprintf(stderr, "Error: %s option requires a path argument.\n", arg.c_str());
                 return 1;
@@ -560,7 +586,7 @@ int main(int argc, char* argv[])
     string_t bin_path = "";
 
     LoadMeshBinFileOpts loaded;
-    SaveMeshData mesh_data;
+    SaveMeshData        mesh_data;
 
     if (!input_path.empty()) {
         // -------------------------------------------------------------
@@ -571,14 +597,14 @@ int main(int argc, char* argv[])
 
         NSLog("Loading OBJ: %s", obj_path.c_str());
         TinyObjData obj_data;
-        if (!load_obj_file(obj_path, obj_data)) return 1;
+        if (!load_obj_file(obj_path, obj_data))
+            return 1;
 
         // Chained invocation returning SaveMeshData by value safely
         mesh_data = build_export_geom(obj_data, MeshletData());
 
         goto stage_save;
-    } 
-    else if (!input_bin_to_patch.empty()) {
+    } else if (!input_bin_to_patch.empty()) {
         // -------------------------------------------------------------
         // Patch Path (BIN to Patched BIN)
         // -------------------------------------------------------------
@@ -615,10 +641,7 @@ int main(int argc, char* argv[])
 stage_save:
     NSLog("Saving binary to '%s'...", bin_path.c_str());
     SaveMeshBinFileOpts save_opts = {
-        .filepath = bin_path,
-        .geometry = mesh_data.geometry,
-        .meshlet_data = mesh_data.meshlet_data
-    };
+        .filepath = bin_path, .geometry = mesh_data.geometry, .meshlet_data = mesh_data.meshlet_data};
 
     if (save_mesh_bin(save_opts)) {
         NSLog("Done!");
