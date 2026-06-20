@@ -532,14 +532,10 @@ vector_t<BoundingSphere> compute_bounding_spheres(const MeshGeometry &geometry, 
     return spheres;
 }
 
-SaveMeshData build_export_geom(const TinyObjData &obj_data, const MeshletData &loaded_meshlets) {
+SaveMeshData build_export_geom(const TinyObjData &obj_data) {
     SaveMeshData result;
-    result.geometry = optimize_mesh(build_vb_ib(obj_data));
-    if (loaded_meshlets.meshlets.empty()) {
-        result.meshlet_data = build_meshlets(result.geometry);
-    } else {
-        result.meshlet_data = loaded_meshlets;
-    }
+    result.geometry             = optimize_mesh(build_vb_ib(obj_data));
+    result.meshlet_data         = build_meshlets(result.geometry);
     result.meshlet_data.spheres = compute_bounding_spheres(result.geometry, result.meshlet_data);
     return result;
 }
@@ -600,10 +596,7 @@ int main(int argc, char *argv[]) {
         if (!load_obj_file(obj_path, obj_data))
             return 1;
 
-        // Chained invocation returning SaveMeshData by value safely
-        mesh_data = build_export_geom(obj_data, MeshletData());
-
-        goto stage_save;
+        mesh_data = build_export_geom(obj_data);
     } else if (!input_bin_to_patch.empty()) {
         // -------------------------------------------------------------
         // Patch Path (BIN to Patched BIN)
@@ -632,16 +625,14 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // Call build_export_geom using loaded meshlets
-        mesh_data = build_export_geom(obj_data, loaded.meshlet_data);
-
-        goto stage_save;
+        mesh_data = build_export_geom(obj_data);
     }
 
-stage_save:
     NSLog("Saving binary to '%s'...", bin_path.c_str());
     SaveMeshBinFileOpts save_opts = {
-        .filepath = bin_path, .geometry = mesh_data.geometry, .meshlet_data = mesh_data.meshlet_data};
+        .filepath       = bin_path, 
+        .geometry       = mesh_data.geometry, 
+        .meshlet_data   = mesh_data.meshlet_data};
 
     if (save_mesh_bin(save_opts)) {
         NSLog("Done!");
