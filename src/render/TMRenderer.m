@@ -4,6 +4,17 @@
 #import <simd/simd.h>
 
 //******************************************************************************
+// TODO:
+//******************************************************************************
+// - [ ] Cruse mesh shaders loading using custom *.bin file
+// - [ ] Cleanup UI code and make it pretty alteast for mac, easy to program
+//     - [ ] add some label on how to navigate etc using esc twice etc.
+// - [ ] improve UI for iOS as well and add radio button for wireframe etc.
+// - [ ] Add support for GPU frustum culling, write the instance buffer to be read by actual mesh shaders using GPU driven setup
+// - [ ] continue with tutorial ==> LODs and selection etc.
+// - [ ] Add support for bindless textures and load materials
+
+//******************************************************************************
 // Logging Utility
 //******************************************************************************
 static NSString* GetProjectRootDir() {
