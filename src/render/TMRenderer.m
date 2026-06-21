@@ -6,11 +6,14 @@
 //******************************************************************************
 // TODO:
 //******************************************************************************
-// - [ ] Cruse mesh shaders loading using custom *.bin file
+// - [x] Cruse mesh shaders loading using custom *.bin file
 // - [ ] Cleanup UI code and make it pretty alteast for mac, easy to program
 //     - [ ] add some label on how to navigate etc using esc twice etc.
 // - [ ] improve UI for iOS as well and add radio button for wireframe etc.
 // - [ ] Add support for GPU frustum culling, write the instance buffer to be read by actual mesh shaders using GPU driven setup
+//    - [ ] Object functions and Instancing
+//    - [ ] Generate LODs 
+//    - [ ] GPU frustum culling and LODs selection
 // - [ ] continue with tutorial ==> LODs and selection etc.
 // - [ ] Add support for bindless textures and load materials
 
@@ -69,8 +72,10 @@ static void TMLog(NSString *format, ...) {
 // Defines
 //******************************************************************************
 
-#define TM_MAX_MESHLET_VERTS 64
-#define TM_MAX_MESHLET_TRIS  124
+#define TM_MAX_MESHLET_VERTS                64
+#define TM_MAX_MESHLET_TRIS                 124
+#define TM_AMPLIFICATION_SHADER_DISPATCHES  32
+#define TM_THREADS_PER_MESH_DISPATCH        128
 
 //******************************************************************************
 // Types
@@ -236,21 +241,23 @@ static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
     }
 
     // Load mesh and fragment shader functions
-    id<MTLFunction> meshFunction = [library newFunctionWithName:@"hello_triangle_mesh_main"];
+    id<MTLFunction> meshFunction     = [library newFunctionWithName:@"hello_triangle_mesh_main"];
+    id<MTLFunction> objectFunction   = [library newFunctionWithName:@"hello_object_main"];
     id<MTLFunction> meshMainFunction = [library newFunctionWithName:@"hello_mesh_main"];
     id<MTLFunction> fragmentFunction = [library newFunctionWithName:@"hello_triangle_fragment_main"];
 
     // Pipeline descriptor setup using Mesh Pipeline State
     MTLMeshRenderPipelineDescriptor *descriptor = [[MTLMeshRenderPipelineDescriptor alloc] init];
-    descriptor.meshFunction = meshMainFunction;
-    descriptor.fragmentFunction = fragmentFunction;
-    descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-    descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    descriptor.objectFunction                   = objectFunction;
+    descriptor.meshFunction                     = meshMainFunction;
+    descriptor.fragmentFunction                 = fragmentFunction;
+    descriptor.colorAttachments[0].pixelFormat  = MTLPixelFormatBGRA8Unorm;
+    descriptor.depthAttachmentPixelFormat       = MTLPixelFormatDepth32Float;
 
     _pipelineState = [_device newRenderPipelineStateWithMeshDescriptor:descriptor 
-                                                               options:MTLPipelineOptionNone 
-                                                            reflection:nil 
-                                                                 error:error];
+                                                                options:MTLPipelineOptionNone 
+                                                                reflection:nil 
+                                                                error:error];
     if (!_pipelineState) {
         if (error && *error) {
             TMLog(@"[Renderer] Error: Failed to create Mesh Render Pipeline State: %@", (*error).localizedDescription);
@@ -400,12 +407,13 @@ static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
         [encoder setMeshBuffer:self.vertMapBuffer offset:0 atIndex:3];
         [encoder setMeshBuffer:self.indicesBuffer offset:0 atIndex:4];
 
-        MTLSize threadGroups = MTLSizeMake(self.meshletsCount, 1, 1);
-        MTLSize threadsPerMesh = MTLSizeMake(128, 1, 1);
+        uint32_t threadGroupCountX = (self.meshletsCount / TM_AMPLIFICATION_SHADER_DISPATCHES) + 1;
+        MTLSize  threadGroups      = MTLSizeMake(threadGroupCountX, 1, 1);
+        MTLSize  threadsPerMesh    = MTLSizeMake(TM_THREADS_PER_MESH_DISPATCH, 1, 1);
 
         [encoder drawMeshThreadgroups:threadGroups 
-            threadsPerObjectThreadgroup:MTLSizeMake(0, 0, 0) 
-            threadsPerMeshThreadgroup:threadsPerMesh];
+                 threadsPerObjectThreadgroup:MTLSizeMake(0, 0, 0) 
+                 threadsPerMeshThreadgroup:threadsPerMesh];
     }
 
     [encoder endEncoding];

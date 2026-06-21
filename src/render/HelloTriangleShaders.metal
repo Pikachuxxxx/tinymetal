@@ -44,7 +44,7 @@ struct Uniforms
 };
 
 //******************************************************************************
-// Mesh Shader
+// Triangle Mesh Shader
 //******************************************************************************
 [[mesh]] void hello_triangle_mesh_main(
     mesh<VertexOut, void, 3, 1, topology::triangle> outputMesh,
@@ -73,6 +73,32 @@ struct Uniforms
     }
 }
 
+//******************************************************************************
+// Amplification Shader
+//******************************************************************************
+#define TM_AMPLIFICATION_SHADER_DISPATCHES 32
+
+struct MeshletPayload 
+{
+    uint meshletIndices[TM_AMPLIFICATION_SHADER_DISPATCHES];
+};
+
+[[object]] void hello_object_main(
+    uint gid [[thread_position_in_threadgroup]],
+    uint gtid [[thread_position_in_grid]],
+    object_data MeshletPayload& outMeshPayload [[payload]],
+    mesh_grid_properties outGrid)
+{
+    // Set meshlets to render over all mesh shader dispatches
+    outMeshPayload.meshletIndices[gtid] = gid;
+    // Set no. of mesh shader dispatches
+    outGrid.set_threadgroups_per_grid(uint3(TM_AMPLIFICATION_SHADER_DISPATCHES, 1, 1));
+}
+
+
+//******************************************************************************
+// Mesh Shader
+//******************************************************************************
 [[mesh]] void hello_mesh_main(
     mesh<VertexOut, void, 64, 128, topology::triangle> outputMesh,
     device const TMMeshVertex* vertices [[buffer(0)]],
@@ -80,11 +106,13 @@ struct Uniforms
     device const TMMeshlet* meshlets [[buffer(2)]],
     device const uint* meshletVertsMap [[buffer(3)]],
     device const uint* meshletIndices [[buffer(4)]],
+    object_data const MeshletPayload& meshletPayload [[payload]],
     uint gtid [[thread_index_in_threadgroup]],
-    uint gid [[threadgroup_position_in_grid]]
-    )
+    uint gid [[threadgroup_position_in_grid]])
 {
-    device const TMMeshlet& m = meshlets[gid];
+    uint meshletIndex = meshletPayload.meshletIndices[gid]; 
+
+    device const TMMeshlet& m = meshlets[meshletIndex];
     outputMesh.set_primitive_count(m.triangle_count);
 
     // set meshletIndices 
