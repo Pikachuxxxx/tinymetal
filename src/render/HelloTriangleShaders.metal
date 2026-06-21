@@ -90,7 +90,7 @@ struct MeshletPayload
     mesh_grid_properties outGrid)
 {
     // Set meshlets to render over all mesh shader dispatches
-    outMeshPayload.meshletIndices[gtid] = gid;
+    outMeshPayload.meshletIndices[gid] = gtid;
     // Set no. of mesh shader dispatches
     outGrid.set_threadgroups_per_grid(uint3(TM_AMPLIFICATION_SHADER_DISPATCHES, 1, 1));
 }

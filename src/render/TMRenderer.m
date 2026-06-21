@@ -407,12 +407,13 @@ static inline simd_float4x4 matrix_scale(float sx, float sy, float sz) {
         [encoder setMeshBuffer:self.vertMapBuffer offset:0 atIndex:3];
         [encoder setMeshBuffer:self.indicesBuffer offset:0 atIndex:4];
 
-        uint32_t threadGroupCountX = (self.meshletsCount / TM_AMPLIFICATION_SHADER_DISPATCHES) + 1;
+        uint64_t threadGroupCountX = (self.meshletsCount / TM_AMPLIFICATION_SHADER_DISPATCHES) + 1;
         MTLSize  threadGroups      = MTLSizeMake(threadGroupCountX, 1, 1);
+        MTLSize  threadsPerObject  = MTLSizeMake(TM_AMPLIFICATION_SHADER_DISPATCHES, 1, 1);
         MTLSize  threadsPerMesh    = MTLSizeMake(TM_THREADS_PER_MESH_DISPATCH, 1, 1);
 
         [encoder drawMeshThreadgroups:threadGroups 
-                 threadsPerObjectThreadgroup:MTLSizeMake(0, 0, 0) 
+                 threadsPerObjectThreadgroup:threadsPerObject 
                  threadsPerMeshThreadgroup:threadsPerMesh];
     }
 
